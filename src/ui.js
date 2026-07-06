@@ -1,4 +1,18 @@
 import { PETAL_TYPES, RARITIES } from './config.js';
+import basicIcon from '../basic.svg';
+import rockIcon from '../rock.svg';
+import roseIcon from '../rose.svg';
+import lightIcon from '../light.svg';
+import stingerIcon from '../stinger.svg';
+
+// petal types without an entry here fall back to the plain color-dot rendering
+const PETAL_ICONS = {
+  basic: basicIcon,
+  rockPetal: rockIcon,
+  rose: roseIcon,
+  light: lightIcon,
+  stinger: stingerIcon,
+};
 
 export class UI {
   constructor(game) {
@@ -43,12 +57,14 @@ export class UI {
       const [type, rarityStr] = key.split(':');
       const rarity = Number(rarityStr);
       const def = PETAL_TYPES[type];
+      const icon = PETAL_ICONS[type];
       const tile = document.createElement('div');
       tile.className = 'invtile' + (this.selected === key ? ' selected' : '');
       tile.style.background = RARITIES[rarity].color;
       tile.innerHTML =
-        `<div class="dot" style="background:${def.color}"></div>` +
-        `<div class="pname">${def.name}</div>` +
+        (icon
+          ? `<img class="picon" src="${icon}" alt="${def.name}" />`
+          : `<div class="dot" style="background:${def.color}"></div><div class="pname">${def.name}</div>`) +
         `<div class="count">${this.inventory.get(key)}</div>`;
       tile.onclick = () => {
         this.selected = this.selected === key ? null : key;
@@ -73,15 +89,15 @@ export class UI {
       slot.className = 'slot' + (item ? '' : ' empty');
       if (item) {
         const def = PETAL_TYPES[item.type];
+        const icon = PETAL_ICONS[item.type];
         slot.style.background = RARITIES[item.rarity].color;
         slot.style.borderColor = 'rgba(0,0,0,0.4)';
-        slot.innerHTML =
-          `<div class="dot" style="background:${def.color}"></div>` +
-          `<div class="pname">${def.name}</div>`;
-      } else {
-        slot.innerHTML = `<div class="pname">${i + 1}</div>`;
+        slot.innerHTML = icon
+          ? `<img class="picon" src="${icon}" alt="${def.name}" />`
+          : `<div class="dot" style="background:${def.color}"></div><div class="pname">${def.name}</div>`;
       }
-      if (rowName === 'primary') {
+      // empty slots stay fully blank, matching florr's loadout bar
+      if (rowName === 'primary' && item) {
         const hk = document.createElement('div');
         hk.className = 'hotkey';
         hk.textContent = i + 1;

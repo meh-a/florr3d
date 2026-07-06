@@ -36,19 +36,19 @@
     #loadout { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
                display: flex; flex-direction: column; align-items: center; gap: 7px; }
     .petalrow { display: flex; gap: 7px; }
-    .slot { width: 62px; height: 62px; border-radius: 9px; background: rgba(200,200,200,0.85);
-            border: 4px solid rgba(85,85,85,0.9); display: flex; flex-direction: column;
+    .slot { width: 62px; height: 62px; border-radius: 5px; background: #d1e6db;
+            border: 4px solid #b4c9be; display: flex; flex-direction: column;
             align-items: center; justify-content: center; cursor: pointer; position: relative;
             transition: transform 0.08s; }
     .slot:hover { transform: scale(1.07); }
-    .petalrow.secondary .slot { width: 48px; height: 48px; border-width: 3px; }
+    .petalrow.secondary .slot { width: 48px; height: 48px; border-width: 3px; border-radius: 4px; }
+    .slot .picon { width: 90%; height: 90%; object-fit: contain; pointer-events: none; }
     .slot .dot { width: 22px; height: 22px; border-radius: 50%; border: 3px solid rgba(0,0,0,0.35); }
     .petalrow.secondary .slot .dot { width: 16px; height: 16px; }
     .slot .pname { font-size: 10px; margin-top: 2px; color: #000; opacity: 0.75; }
     .petalrow.secondary .slot .pname { font-size: 8px; }
     .slot .hotkey { position: absolute; top: 1px; right: 4px; font-size: 10px; color: rgba(0,0,0,0.4); }
     .slot.cooling { filter: brightness(0.5); }
-    .slot.empty .pname { opacity: 0.35; font-size: 14px; }
 
     /* inventory */
     #invwrap { position: absolute; bottom: 14px; left: 14px; max-width: 300px; }
@@ -58,6 +58,7 @@
                display: flex; flex-direction: column; align-items: center; justify-content: center;
                cursor: pointer; position: relative; }
     .invtile.selected { outline: 3px solid #fff; transform: scale(1.1); }
+    .invtile .picon { width: 88%; height: 88%; object-fit: contain; pointer-events: none; }
     .invtile .dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(0,0,0,0.35); }
     .invtile .pname { font-size: 8px; color: #000; opacity: 0.75; }
     .invtile .count { position: absolute; top: -6px; right: -6px; background: #222; color: #fff;
