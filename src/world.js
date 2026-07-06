@@ -29,7 +29,7 @@ function loadTileTexture(renderer) {
       texture.needsUpdate = true;
       resolve(texture);
     };
-    img.src = '/tile.svg';
+    img.src = `${import.meta.env.BASE_URL}tile.svg`;
   });
 }
 
