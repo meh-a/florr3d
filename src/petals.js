@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PETAL_TYPES, RARITIES } from './config.js';
 import { makePetalMesh } from './models.js';
-import { uid, damp } from './utils.js';
+import { uid, damp, disposeObject3D } from './utils.js';
 
 const SLOTS = 5;
 const BASE_ROT_SPEED = 2.4; // rad/s
@@ -52,7 +52,10 @@ export class PetalManager {
   }
 
   rebuildAll() {
-    for (const inst of this.instances) this.game.scene.remove(inst.mesh);
+    for (const inst of this.instances) {
+      this.game.scene.remove(inst.mesh);
+      disposeObject3D(inst.mesh);
+    }
     this.instances = [];
 
     // count total orbit positions so all instances spread evenly, like florr

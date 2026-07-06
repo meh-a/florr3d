@@ -43,23 +43,54 @@ export function makeRockGeometry(radius, jitter = 0.16) {
   return geo;
 }
 
+// flash duration is uniform across a call, so track a single expiry on the
+// root instead of per-material — lets updateFlash skip the traversal
+// entirely on the vast majority of frames where nothing is flashing.
 export function flashMaterials(root, duration = 0.12) {
+  root.userData.flashUntil = performance.now() + duration * 1000;
   root.traverse((obj) => {
     if (obj.isMesh && obj.material && obj.material.emissive !== undefined) {
       obj.material.emissive.setScalar(0.55);
-      obj.material.userData.flashUntil = performance.now() + duration * 1000;
     }
   });
 }
 
 export function updateFlash(root) {
-  const now = performance.now();
-  root.traverse((obj) => {
-    if (obj.isMesh && obj.material && obj.material.userData.flashUntil) {
-      if (now > obj.material.userData.flashUntil) {
+  if (!root.userData.flashUntil) return;
+  if (performance.now() > root.userData.flashUntil) {
+    root.traverse((obj) => {
+      if (obj.isMesh && obj.material && obj.material.emissive !== undefined) {
         obj.material.emissive.setScalar(0);
-        delete obj.material.userData.flashUntil;
       }
+    });
+    delete root.userData.flashUntil;
+  }
+}
+
+// dispose materials only — safe to call even when geometry is shared
+// across other live instances (e.g. cached mob part geometries)
+export function disposeMaterials(root) {
+  const seen = new Set();
+  root.traverse((obj) => {
+    if (!obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const m of mats) {
+      if (seen.has(m)) continue;
+      seen.add(m);
+      m.dispose();
+    }
+  });
+}
+
+// full teardown: materials plus geometry. Only use this for objects whose
+// geometry is never shared with other still-living instances.
+export function disposeObject3D(root) {
+  disposeMaterials(root);
+  const seenGeo = new Set();
+  root.traverse((obj) => {
+    if (obj.geometry && !seenGeo.has(obj.geometry)) {
+      seenGeo.add(obj.geometry);
+      obj.geometry.dispose();
     }
   });
 }

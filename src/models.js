@@ -5,6 +5,20 @@ import { PETAL_TYPES, RARITIES } from './config.js';
 const YELLOW = '#ffe763';
 const BLACK = '#2b2b2b';
 
+// Mob part geometries are identical across every instance of a given type
+// (rarity scaling is applied to the whole group, not baked into the mesh),
+// so we cache and reuse them instead of re-allocating GPU buffers per spawn.
+// Rock is excluded on purpose — its jittered geometry is meant to vary.
+const geoCache = new Map();
+function sharedGeo(key, factory) {
+  let geo = geoCache.get(key);
+  if (!geo) {
+    geo = factory();
+    geoCache.set(key, geo);
+  }
+  return geo;
+}
+
 // The player flower: yellow sphere with a simple face on its +Z side.
 export function makeFlower(radius = 1.1) {
   const group = new THREE.Group();
@@ -49,22 +63,25 @@ function makeLadybugMob(radius) {
   // 0.72 * 1.1 * radius of clearance for the bottom to sit on the ground
   const lift = radius * 0.8;
 
-  const shell = new THREE.Mesh(new THREE.SphereGeometry(radius, 24, 18), toonMat('#d1291b'));
+  const shellGeo = sharedGeo(`ladybug-shell-${radius}`, () => new THREE.SphereGeometry(radius, 24, 18));
+  const shell = new THREE.Mesh(shellGeo, toonMat('#d1291b'));
   shell.scale.set(1, 0.72, 1.08);
   addOutline(shell, 0.1);
   shell.position.y = lift;
   group.add(shell);
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.45, 16, 12), toonMat(BLACK));
+  const headGeo = sharedGeo(`ladybug-head-${radius}`, () => new THREE.SphereGeometry(radius * 0.45, 16, 12));
+  const head = new THREE.Mesh(headGeo, toonMat(BLACK));
   head.position.set(0, lift * 0.75, radius * 0.95);
   group.add(head);
 
+  const spotGeo = sharedGeo(`ladybug-spot-${radius}`, () => new THREE.SphereGeometry(radius * 0.22, 10, 8));
   const spotMat = toonMat(BLACK);
   const spots = [
     [0.45, 0.62, -0.25], [-0.5, 0.58, 0.15], [0.05, 0.68, -0.65],
   ];
   for (const [x, y, z] of spots) {
-    const spot = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.22, 10, 8), spotMat);
+    const spot = new THREE.Mesh(spotGeo, spotMat);
     spot.scale.set(1, 0.45, 1);
     spot.position.set(x * radius, lift + y * radius * 0.72, z * radius);
     group.add(spot);
@@ -78,7 +95,8 @@ function makeBeeMob(radius) {
   const a = radius * 0.78; // ellipsoid x/y radius
   const c = radius * 1.18; // ellipsoid z radius
 
-  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 18), toonMat(YELLOW));
+  const bodyGeo = sharedGeo('bee-body', () => new THREE.SphereGeometry(1, 24, 18));
+  const body = new THREE.Mesh(bodyGeo, toonMat(YELLOW));
   body.scale.set(a, a * 0.95, c);
   addOutline(body, 0.1);
   body.position.y = lift;
@@ -93,23 +111,27 @@ function makeBeeMob(radius) {
     const z = zFrac * c;
     const surfaceR = a * Math.sqrt(Math.max(0.05, 1 - (z / c) ** 2));
     const ringR = Math.max(0.05, surfaceR - tube * 0.9);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(ringR, tube, 10, 28), stripeMat);
+    const ringGeo = sharedGeo(`bee-ring-${radius}-${zFrac}`, () => new THREE.TorusGeometry(ringR, tube, 10, 28));
+    const ring = new THREE.Mesh(ringGeo, stripeMat);
     ring.position.set(0, lift, z);
     group.add(ring);
   }
 
-  const stinger = new THREE.Mesh(new THREE.ConeGeometry(radius * 0.28, radius * 0.7, 10), stripeMat);
+  const stingerGeo = sharedGeo(`bee-stinger-${radius}`, () => new THREE.ConeGeometry(radius * 0.28, radius * 0.7, 10));
+  const stinger = new THREE.Mesh(stingerGeo, stripeMat);
   stinger.rotation.x = -Math.PI / 2; // point toward -Z (rear)
   stinger.position.set(0, lift, -c - radius * 0.2);
   group.add(stinger);
 
+  const antGeo = sharedGeo(`bee-ant-${radius}`, () => new THREE.CylinderGeometry(0.04, 0.04, radius * 0.65, 6));
+  const antTipGeo = sharedGeo(`bee-anttip-${radius}`, () => new THREE.SphereGeometry(radius * 0.11, 8, 6));
   for (const sx of [-1, 1]) {
-    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, radius * 0.65, 6), stripeMat);
+    const ant = new THREE.Mesh(antGeo, stripeMat);
     ant.rotation.x = 0.9;
     ant.rotation.z = -sx * 0.35;
     ant.position.set(sx * radius * 0.28, lift + a * 0.75, c * 0.75);
     group.add(ant);
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.11, 8, 6), stripeMat);
+    const tip = new THREE.Mesh(antTipGeo, stripeMat);
     tip.position.set(sx * radius * 0.42, lift + a * 0.95, c * 0.95);
     group.add(tip);
   }
@@ -151,7 +173,17 @@ export function makeHealthBar(width, anisotropy = 1) {
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
   mesh.renderOrder = 990;
 
-  function draw(greenFrac, redFrac) {
+  // canvas repaint + texture re-upload are the expensive part here, and this
+  // gets called every frame for every mob — skip it once the bar has settled
+  // at its current fractions instead of redrawing identical pixels forever
+  let lastGreen = -1, lastRed = -1;
+  function draw(greenFrac, redFrac, force = false) {
+    const g = Math.max(0, Math.min(1, greenFrac));
+    const r = Math.max(0, Math.min(1, redFrac));
+    if (!force && Math.abs(g - lastGreen) < 0.0008 && Math.abs(r - lastRed) < 0.0008) return;
+    lastGreen = g;
+    lastRed = r;
+
     const w = canvas.width, h = canvas.height;
     const pad = h * 0.12; // dark backing's padding around the fill
     ctx.clearRect(0, 0, w, h);
@@ -164,15 +196,15 @@ export function makeHealthBar(width, anisotropy = 1) {
     roundRectPath(ctx, pad, pad, w - pad * 2, h - pad * 2, (h - pad * 2) / 2);
     ctx.clip();
     ctx.fillStyle = '#c22a1e';
-    ctx.fillRect(0, 0, w * Math.max(0, Math.min(1, redFrac)), h);
+    ctx.fillRect(0, 0, w * r, h);
     ctx.fillStyle = '#78dd39';
-    ctx.fillRect(0, 0, w * Math.max(0, Math.min(1, greenFrac)), h);
+    ctx.fillRect(0, 0, w * g, h);
     ctx.restore();
 
     texture.needsUpdate = true;
   }
 
-  draw(1, 1);
+  draw(1, 1, true);
   return { mesh, texture, draw };
 }
 

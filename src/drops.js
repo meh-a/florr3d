@@ -1,5 +1,5 @@
 import { makeDropMesh } from './models.js';
-import { uid } from './utils.js';
+import { uid, disposeObject3D } from './utils.js';
 
 const LIFETIME = 30;
 
@@ -29,7 +29,10 @@ export class DropManager {
         this.game.ui.addToInventory(drop.type, drop.rarity);
         drop.gone = true;
       }
-      if (drop.gone) this.game.scene.remove(drop.mesh);
+      if (drop.gone) {
+        this.game.scene.remove(drop.mesh);
+        disposeObject3D(drop.mesh);
+      }
     }
     this.drops = this.drops.filter((d) => !d.gone);
   }

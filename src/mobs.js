@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { MOB_TYPES, RARITIES, MOB_CAP, ARENA_HALF, pickRarity, pickDrop } from './config.js';
 import { makeMobMesh, makeHealthBar } from './models.js';
-import { uid, damp, flashMaterials, updateFlash } from './utils.js';
+import { uid, damp, flashMaterials, updateFlash, disposeMaterials, disposeObject3D } from './utils.js';
 import { clampToArena } from './world.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -66,6 +66,11 @@ class Mob {
     const dropType = pickDrop(this.type);
     if (dropType) this.game.drops.spawn(dropType, this.rarity, this.pos);
     this.game.scene.remove(this.mesh);
+    // rock geometry is per-instance (jittered) and safe to free fully;
+    // ladybug/bee part geometries are cached and shared across other live
+    // mobs of the same type, so only their materials get disposed here
+    if (this.type === 'rock') disposeObject3D(this.mesh);
+    else disposeMaterials(this.mesh);
     this.game.scene.remove(this.hpBar.mesh);
     this.hpBar.mesh.geometry.dispose();
     this.hpBar.mesh.material.dispose();
