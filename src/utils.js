@@ -21,8 +21,20 @@ export function addOutline(mesh, thickness = 0.12, color = null) {
     new THREE.MeshBasicMaterial({ color: c, side: THREE.BackSide })
   );
   outline.scale.setScalar(1 + thickness);
+  outline.userData.isOutline = true; // excluded from shadow casting, see enableShadows
   mesh.add(outline);
   return outline;
+}
+
+// marks the toon-shaded shape meshes in a group as shadow participants,
+// skipping outline hulls (their inverted, enlarged backside geometry
+// would otherwise cast a warped double-shadow)
+export function enableShadows(root, { cast = true, receive = false } = {}) {
+  root.traverse((obj) => {
+    if (!obj.isMesh || obj.userData.isOutline) return;
+    if (cast) obj.castShadow = true;
+    if (receive) obj.receiveShadow = true;
+  });
 }
 
 // randomized rock geometry: jittered icosahedron

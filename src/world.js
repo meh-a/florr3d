@@ -79,11 +79,29 @@ export function createWorld(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(innerWidth, innerHeight);
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0x668866, 1.6));
+  const sunOffset = new THREE.Vector3(30, 60, 20);
   const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-  sun.position.set(30, 60, 20);
+  sun.position.copy(sunOffset);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.near = 10;
+  sun.shadow.camera.far = 180;
+  sun.shadow.camera.left = -55;
+  sun.shadow.camera.right = 55;
+  sun.shadow.camera.top = 55;
+  sun.shadow.camera.bottom = -55;
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.02;
+  // the shadow camera is a fixed-size box, so it has to re-center on the
+  // player each frame rather than covering the whole (much larger) arena
+  const sunTarget = new THREE.Object3D();
+  scene.add(sunTarget);
+  sun.target = sunTarget;
   scene.add(sun);
 
   // visible sun + lens flare, placed far along the light direction
@@ -109,9 +127,10 @@ export function createWorld(container) {
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(ARENA_HALF * 2 + 10, ARENA_HALF * 2 + 10),
-    new THREE.MeshBasicMaterial({ color: '#1ea761' })
+    new THREE.MeshToonMaterial({ color: '#1ea761' })
   );
   ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
   scene.add(ground);
 
   loadTileTexture(renderer).then((texture) => {
@@ -132,6 +151,9 @@ export function createWorld(container) {
   const FPS_FOV = 75;
   // look = { yaw, pitch } for first-person mode, or null for the top-down chase cam
   function updateCamera(dt, focus, look = null) {
+    sun.position.set(focus.x + sunOffset.x, sunOffset.y, focus.z + sunOffset.z);
+    sunTarget.position.set(focus.x, 0, focus.z);
+
     const fov = look ? FPS_FOV : TOPDOWN_FOV;
     if (camera.fov !== fov) {
       camera.fov = fov;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toonMat, addOutline, makeRockGeometry } from './utils.js';
+import { toonMat, addOutline, makeRockGeometry, enableShadows } from './utils.js';
 import { PETAL_TYPES, RARITIES } from './config.js';
 
 const YELLOW = '#ffe763';
@@ -42,6 +42,7 @@ export function makeFlower(radius = 1.1) {
   mouth.rotation.z = Math.PI + (Math.PI - Math.PI * 0.75) / 2;
   mouth.position.set(0, -radius * 0.18, radius * 0.92);
   group.add(mouth);
+  enableShadows(group, { cast: true, receive: true });
   return group;
 }
 
@@ -54,6 +55,7 @@ function makeRockMob(radius) {
   body.position.y = radius * 0.8;
   body.rotation.y = Math.random() * Math.PI * 2;
   group.add(body);
+  enableShadows(group, { cast: true, receive: true });
   return group;
 }
 
@@ -86,6 +88,7 @@ function makeLadybugMob(radius) {
     spot.position.set(x * radius, lift + y * radius * 0.72, z * radius);
     group.add(spot);
   }
+  enableShadows(group, { cast: true, receive: true });
   return group;
 }
 
@@ -135,6 +138,7 @@ function makeBeeMob(radius) {
     tip.position.set(sx * radius * 0.42, lift + a * 0.95, c * 0.95);
     group.add(tip);
   }
+  enableShadows(group, { cast: true, receive: true });
   return group;
 }
 
@@ -231,6 +235,7 @@ export function makePetalMesh(type, radius) {
   addOutline(mesh, 0.2);
   const group = new THREE.Group();
   group.add(mesh);
+  enableShadows(group, { cast: true, receive: false });
   return group;
 }
 
