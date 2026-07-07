@@ -1,10 +1,8 @@
 import * as THREE from 'three';
-import { MOB_TYPES, RARITIES, MOB_CAP, ARENA_HALF, pickRarity, pickDrop } from './config.js';
-import { makeMobMesh, makeHealthBar } from './models.js';
-import { uid, damp, flashMaterials, updateFlash, disposeMaterials, disposeObject3D } from './utils.js';
-import { clampToArena } from './world.js';
-
-const UP = new THREE.Vector3(0, 1, 0);
+import {
+  MOB_TYPES, RARITIES, MOB_CAP, ARENA_HALF, clampToArena, pickRarity, pickDrop,
+} from '../shared/config.js';
+import { uid } from './utils.js';
 
 class Mob {
   constructor(game, type, rarityIdx, pos) {
@@ -24,32 +22,23 @@ class Mob {
 
     this.pos = pos.clone();
     this.heading = Math.random() * Math.PI * 2;
+    this.facing = this.heading;
     this.wanderTimer = 0;
     this.sinePhase = Math.random() * Math.PI * 2;
     this.aggro = false;
     this.knock = new THREE.Vector3();
     this.hitCooldowns = new Map();
     this.deadFlag = false;
-
-    this.mesh = makeMobMesh(type, this.def.radius);
-    this.mesh.scale.setScalar(r.scale);
-    this.mesh.position.copy(this.pos);
-    game.scene.add(this.mesh);
-
-    this.displayHp = this.hp;
-    this.barOffsetY = this.radius * 2.1 + 0.35;
-    this.hpBar = makeHealthBar(
-      Math.max(1.4, this.radius * 1.7),
-      game.renderer.capabilities.getMaxAnisotropy()
-    );
-    game.scene.add(this.hpBar.mesh);
   }
 
   damage(amount, source = null) {
     const dealt = Math.max(1, amount - this.armor);
     this.hp -= dealt;
-    flashMaterials(this.mesh);
-    this.game.effects.spawnDamageNumber(dealt, this.pos);
+    this.game.events.push({ e: 'flash', id: this.id });
+    this.game.events.push({
+      e: 'dmg', a: Math.round(dealt),
+      x: Math.round(this.pos.x * 100) / 100, z: Math.round(this.pos.z * 100) / 100,
+    });
     // Rare+ mobs retaliate when attacked
     if (this.rarity >= 2) this.aggro = true;
     if (source) {
@@ -65,16 +54,6 @@ class Mob {
     this.game.player.gainXp(this.xp);
     const dropType = pickDrop(this.type);
     if (dropType) this.game.drops.spawn(dropType, this.rarity, this.pos);
-    this.game.scene.remove(this.mesh);
-    // rock geometry is per-instance (jittered) and safe to free fully;
-    // ladybug/bee part geometries are cached and shared across other live
-    // mobs of the same type, so only their materials get disposed here
-    if (this.type === 'rock') disposeObject3D(this.mesh);
-    else disposeMaterials(this.mesh);
-    this.game.scene.remove(this.hpBar.mesh);
-    this.hpBar.mesh.geometry.dispose();
-    this.hpBar.mesh.material.dispose();
-    this.hpBar.texture.dispose();
   }
 
   update(dt) {
@@ -116,24 +95,7 @@ class Mob {
     this.knock.multiplyScalar(Math.exp(-6 * dt));
     clampToArena(this.pos, this.radius);
 
-    // lerped visuals + facing
-    this.mesh.position.lerp(this.pos, damp(10, dt));
-    if (vel.lengthSq() > 0.01) {
-      const q = new THREE.Quaternion().setFromAxisAngle(UP, Math.atan2(vel.x, vel.z));
-      this.mesh.quaternion.slerp(q, damp(6, dt));
-    }
-    updateFlash(this.mesh);
-
-    this.displayHp += (this.hp - this.displayHp) * damp(3, dt);
-    this.hpBar.draw(this.hp / this.maxHp, this.displayHp / this.maxHp);
-    this.hpBar.mesh.position.set(
-      this.mesh.position.x, this.mesh.position.y + this.barOffsetY, this.mesh.position.z
-    );
-    this.hpBar.mesh.quaternion.copy(this.game.camera.quaternion);
-    // bars skip depth testing, so order them by distance — nearer bars draw
-    // later (on top) but always below damage numbers at renderOrder 999
-    const camDist = this.hpBar.mesh.position.distanceTo(this.game.camera.position);
-    this.hpBar.mesh.renderOrder = 998 - Math.min(camDist, 500) * 0.016;
+    if (vel.lengthSq() > 0.01) this.facing = Math.atan2(vel.x, vel.z);
   }
 }
 

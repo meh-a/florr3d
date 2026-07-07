@@ -1,4 +1,4 @@
-import { HIT_COOLDOWN, PLAYER_BODY_DAMAGE } from './config.js';
+import { HIT_COOLDOWN, PLAYER_BODY_DAMAGE } from '../shared/config.js';
 
 // per-pair damage tick limiter, stored on the entity that owns the map
 function canHit(owner, otherId, time) {

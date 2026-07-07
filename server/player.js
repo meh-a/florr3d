@@ -1,12 +1,13 @@
 import * as THREE from 'three';
-import { makeFlower } from './models.js';
-import { uid, damp, flashMaterials, updateFlash } from './utils.js';
-import { clampToArena } from './world.js';
+import { clampToArena } from '../shared/config.js';
 
+// Authoritative player. Movement is driven by the last input the client
+// sent (cursor target in top-down mode, yaw + move axes in first person);
+// hp/xp/death are decided here and only reported to the client.
 export class Player {
   constructor(game) {
     this.game = game;
-    this.id = uid();
+    this.id = 0; // sentinel id used in flash events; mobs use uid() >= 1
     this.pos = new THREE.Vector3(0, 0, 0);
     this.radius = 1.1;
     this.maxHp = 200;
@@ -19,10 +20,6 @@ export class Player {
     this.deadTimer = 0;
     this.hitCooldowns = new Map();
     this.knock = new THREE.Vector3();
-
-    this.mesh = makeFlower(this.radius);
-    this.mesh.position.set(0, this.radius, 0);
-    game.scene.add(this.mesh);
     this.facing = 0;
   }
 
@@ -33,20 +30,18 @@ export class Player {
     while (this.xp >= this.xpForNext()) {
       this.xp -= this.xpForNext();
       this.level++;
-      this.game.ui.toast(`Level ${this.level}!`);
+      this.game.toast(`Level ${this.level}!`);
     }
   }
 
   damage(amount) {
     if (this.dead) return;
     this.hp -= amount;
-    flashMaterials(this.mesh);
+    this.game.events.push({ e: 'flash', id: this.id });
     if (this.hp <= 0) {
       this.hp = 0;
       this.dead = true;
       this.deadTimer = 3;
-      this.mesh.visible = false;
-      this.game.ui.showDeath(true);
     }
   }
 
@@ -55,38 +50,38 @@ export class Player {
   }
 
   update(dt) {
+    const input = this.game.input;
+
     if (this.dead) {
       this.deadTimer -= dt;
-      this.game.ui.setDeathTimer(this.deadTimer);
       if (this.deadTimer <= 0) {
         this.dead = false;
         this.hp = this.maxHp;
         this.pos.set(0, 0, 0);
-        this.mesh.position.set(0, this.radius, 0);
-        this.mesh.visible = true;
-        this.game.ui.showDeath(false);
+        this.knock.set(0, 0, 0);
       }
       return;
     }
 
     this.heal(this.regen * dt);
 
-    if (this.game.fpsMode) {
+    if (input.fps) {
       // first-person: WASD relative to the look direction
-      const { yaw } = this.game.input.look;
-      const axes = this.game.input.moveAxes();
-      if (axes.x !== 0 || axes.z !== 0) {
+      const yaw = input.yaw;
+      let { ax, az } = input;
+      const len = Math.hypot(ax, az);
+      if (len > 1) { ax /= len; az /= len; }
+      if (ax !== 0 || az !== 0) {
         const delta = new THREE.Vector3(
-          -Math.sin(yaw) * axes.z + Math.cos(yaw) * axes.x, 0,
-          -Math.cos(yaw) * axes.z - Math.sin(yaw) * axes.x
+          -Math.sin(yaw) * az + Math.cos(yaw) * ax, 0,
+          -Math.cos(yaw) * az - Math.sin(yaw) * ax
         ).multiplyScalar(this.speed * dt);
         this.pos.add(delta);
       }
       this.facing = yaw + Math.PI;
     } else {
       // florr-style movement: flower chases the cursor, speed scales with distance
-      const target = this.game.input.cursorWorld();
-      const delta = new THREE.Vector3(target.x - this.pos.x, 0, target.z - this.pos.z);
+      const delta = new THREE.Vector3(input.tx - this.pos.x, 0, input.tz - this.pos.z);
       const dist = delta.length();
       if (dist > 0.6) {
         const speedFrac = Math.min(1, dist / 8);
@@ -98,18 +93,5 @@ export class Player {
     this.pos.addScaledVector(this.knock, dt);
     this.knock.multiplyScalar(Math.exp(-6 * dt));
     clampToArena(this.pos, this.radius);
-
-    // the camera sits inside the flower in first person
-    this.mesh.visible = !this.game.fpsMode;
-
-    // lerped visuals
-    this.mesh.position.lerp(
-      new THREE.Vector3(this.pos.x, this.radius, this.pos.z), damp(14, dt)
-    );
-    const targetQ = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0), this.facing
-    );
-    this.mesh.quaternion.slerp(targetQ, damp(8, dt));
-    updateFlash(this.mesh);
   }
 }

@@ -23,7 +23,13 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+      # Set the GAME_SERVER_URL repository variable (Settings → Secrets and
+      # variables → Actions → Variables) to e.g. wss://yourserver.example/ws
+      # to pin the Pages build to a dedicated game server. Leave it unset and
+      # the Pages build falls back to the in-browser worker sim.
       - run: npm run build
+        env:
+          VITE_WS_URL: ${{ vars.GAME_SERVER_URL }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

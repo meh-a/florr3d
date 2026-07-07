@@ -35,9 +35,34 @@ export const PETAL_TYPES = {
 };
 
 export const ARENA_HALF = 145;       // playable half-extent; ground drawn a bit larger
+
+// ---- terrain tiles ----
+// The arena is an implicit grass grid; MAP_TILES sparsely overrides cells by
+// grid coordinate (cell centers at gx/gz * TILE_SIZE). Tile types carry no
+// gameplay yet, but they live here (not client-side) so the server can add
+// per-tile effects later (slows, damage, spawns) without a protocol change.
+export const TILE_SIZE = 20;
+export const TILE_TYPES = {
+  grass: { name: 'Grass' },
+  water: { name: 'Water' },
+  // future tile types (mud, rock, ...) get an entry here plus a renderer
+  // case in client/src/tiles.js
+};
+// debug placement: two water tiles just east of spawn
+export const MAP_TILES = [
+  { gx: 1, gz: 0, type: 'water' },
+  { gx: 2, gz: 0, type: 'water' },
+];
 export const MOB_CAP = 22;
 export const PLAYER_BODY_DAMAGE = 10;
 export const HIT_COOLDOWN = 0.45;    // seconds between damage ticks for a touching pair
+
+// works on anything with mutable x/z (THREE.Vector3 or plain objects)
+export function clampToArena(pos, margin = 0) {
+  const half = ARENA_HALF - margin;
+  pos.x = Math.max(-half, Math.min(half, pos.x));
+  pos.z = Math.max(-half, Math.min(half, pos.z));
+}
 
 export function pickRarity(rng = Math.random) {
   const total = RARITIES.reduce((s, r) => s + r.weight, 0);

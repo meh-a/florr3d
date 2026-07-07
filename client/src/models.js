@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { toonMat, addOutline, makeRockGeometry, enableShadows } from './utils.js';
-import { PETAL_TYPES, RARITIES } from './config.js';
+import { PETAL_TYPES, RARITIES } from '../../shared/config.js';
 
 const YELLOW = '#ffe763';
 const BLACK = '#2b2b2b';
@@ -196,14 +196,17 @@ export function makeHealthBar(width, anisotropy = 1) {
     ctx.fillStyle = 'rgba(26,26,26,0.75)';
     ctx.fill();
 
-    ctx.save();
-    roundRectPath(ctx, pad, pad, w - pad * 2, h - pad * 2, (h - pad * 2) / 2);
-    ctx.clip();
-    ctx.fillStyle = '#c22a1e';
-    ctx.fillRect(0, 0, w * r, h);
-    ctx.fillStyle = '#78dd39';
-    ctx.fillRect(0, 0, w * g, h);
-    ctx.restore();
+    // each fill is its own pill so the trailing end stays rounded; width
+    // never drops below the bar height, so low fractions render as a dot
+    const innerW = w - pad * 2, innerH = h - pad * 2;
+    const pill = (frac, color) => {
+      if (frac <= 0) return;
+      roundRectPath(ctx, pad, pad, Math.max(innerH, innerW * frac), innerH, innerH / 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+    };
+    pill(r, '#c22a1e');
+    pill(g, '#78dd39');
 
     texture.needsUpdate = true;
   }
