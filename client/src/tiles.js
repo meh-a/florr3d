@@ -101,7 +101,7 @@ export function makeTiles(scene, quality, sunDir) {
   // future tile types: filter and render them here
   if (waterTiles.length) {
     buildBasin(scene, waterTiles);
-    if (quality === 'high') updates.push(makeReflectiveWater(scene, waterTiles, sunDir));
+    if (quality !== 'low') updates.push(makeReflectiveWater(scene, waterTiles, sunDir));
     else makeFlatWater(scene, waterTiles);
   }
 

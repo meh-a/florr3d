@@ -4,6 +4,8 @@ import { ARENA_HALF, TILE_SIZE, MAP_TILES } from '../../shared/config.js';
 import { damp } from './utils.js';
 import { getQuality } from './settings.js';
 import { makeTiles } from './tiles.js';
+import { makeGrass } from './grass.js';
+import grassColorUrl from '../assets/grass_color.jpg';
 
 const TILE_WORLD_SIZE = 10; // units per tile.svg repeat
 
@@ -256,8 +258,11 @@ function makeVolumetricClouds(scene, renderer, sunDir) {
 export function createWorld(container) {
   // 'high': shadows, AA, native pixel ratio, lens flare, baked volumetric
   // clouds, shader water. 'low': none of those — toon clouds, flat water.
+  // 'ultra': everything from 'high' plus the instanced grass field (and a
+  // muted ground tint so the cartoon grid doesn't glow between the blades).
   const quality = getQuality();
-  const highQ = quality === 'high';
+  const highQ = quality !== 'low';
+  const ultra = quality === 'ultra';
 
   const scene = new THREE.Scene();
   const SKY = '#7ec8f5';
@@ -360,11 +365,26 @@ export function createWorld(container) {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  loadTileTexture(renderer).then((texture) => {
-    ground.material.map = texture;
-    ground.material.color.set(0xffffff);
-    ground.material.needsUpdate = true;
-  });
+  if (ultra) {
+    // photographic turf (CC0, ambientCG Grass004) instead of the cartoon
+    // tile grid — the instanced blades provide depth, the photo provides
+    // the fine detail neither could fake alone
+    new THREE.TextureLoader().load(grassColorUrl, (texture) => {
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      texture.repeat.set(1 / 8, 1 / 8); // one photo repeat per 8 world units
+      ground.material.map = texture;
+      ground.material.color.set(0xffffff);
+      ground.material.needsUpdate = true;
+    });
+  } else {
+    loadTileTexture(renderer).then((texture) => {
+      ground.material.map = texture;
+      ground.material.color.set(0xffffff);
+      ground.material.needsUpdate = true;
+    });
+  }
 
   window.addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
@@ -376,6 +396,7 @@ export function createWorld(container) {
     ? makeVolumetricClouds(scene, renderer, sunOffset)
     : makeCloudField(scene);
   const updateTiles = makeTiles(scene, quality, sunOffset);
+  const updateGrass = ultra ? makeGrass(scene, sunOffset) : null;
 
   const camTarget = new THREE.Vector3();
   const FPS_EYE_HEIGHT = 1.2;
@@ -385,6 +406,7 @@ export function createWorld(container) {
   function updateCamera(dt, focus, look = null) {
     updateClouds(dt);
     updateTiles(dt);
+    if (updateGrass) updateGrass(dt, focus);
     sun.position.set(focus.x + sunOffset.x, sunOffset.y, focus.z + sunOffset.z);
     sunTarget.position.set(focus.x, 0, focus.z);
 
