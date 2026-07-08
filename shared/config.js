@@ -24,6 +24,15 @@ export const MOB_TYPES = {
     name: 'Bee', hp: 15, dmg: 40, armor: 0, radius: 1.4, speed: 2.8, xp: 5,
     drops: [['stinger', 0.55], [null, 0.45]],
   },
+  hornet: {
+    name: 'Hornet', hp: 62.5, dmg: 50, armor: 1, radius: 1.7, speed: 2.0, xp: 12,
+    drops: [[null, 1]], // TODO: hornet drops (missile petal?) come later
+    // rarer spawn than the basic mobs, and never more than a few alive at
+    // once — it's much more dangerous
+    spawnWeight: 0.35,
+    maxAlive: 3,
+    missile: { hp: 5, dmg: 10, speed: 16, radius: 0.45 },
+  },
 };
 
 export const PETAL_TYPES = {

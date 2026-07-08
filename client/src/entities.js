@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PETAL_TYPES, MOB_TYPES, RARITIES } from '../../shared/config.js';
-import { makeFlower, makeMobMesh, makeHealthBar, makePetalMesh, makeDropMesh } from './models.js';
+import { makeFlower, makeMobMesh, makeHealthBar, makePetalMesh, makeDropMesh, makeMissileMesh } from './models.js';
 import { damp, flashMaterials, updateFlash, disposeMaterials, disposeObject3D } from './utils.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -13,9 +13,10 @@ export class EntitySync {
   constructor(game) {
     this.game = game;
     this.state = null;
-    this.mobs = new Map();   // id -> view
-    this.petals = new Map(); // id -> view
-    this.drops = new Map();  // id -> view
+    this.mobs = new Map();     // id -> view
+    this.petals = new Map();   // id -> view
+    this.drops = new Map();    // id -> view
+    this.missiles = new Map(); // id -> view
 
     this.playerMesh = makeFlower(PLAYER_RADIUS);
     this.playerMesh.position.set(0, PLAYER_RADIUS, 0);
@@ -34,10 +35,18 @@ export class EntitySync {
 
     this.syncCollection(this.mobs, state.mobs, (m) => this.createMob(m), (v) => this.removeMob(v),
       (v, m) => {
-        v.target.set(m.x, 0, m.z);
+        v.target.set(m.x, m.y || 0, m.z);
         v.facing = m.facing;
+        v.pitch = m.pitch || 0;
+        v.loaded = m.loaded !== false;
         v.hp = m.hp;
         v.maxHp = m.maxHp;
+      });
+
+    this.syncCollection(this.missiles, state.missiles || [], (mi) => this.createMissile(mi), (v) => this.removeMissile(v),
+      (v, mi) => {
+        v.target.set(mi.x, mi.y, mi.z);
+        v.mesh.rotation.set(mi.pitch, mi.yaw, 0, 'YXZ');
       });
 
     this.syncCollection(this.petals, state.petals.instances, (p) => this.createPetal(p), (v) => this.removePetal(v),
@@ -94,7 +103,7 @@ export class EntitySync {
     const radius = def.radius * scale;
     const mesh = makeMobMesh(m.type, def.radius);
     mesh.scale.setScalar(scale);
-    mesh.position.set(m.x, 0, m.z);
+    mesh.position.set(m.x, m.y || 0, m.z);
     this.game.scene.add(mesh);
 
     const hpBar = makeHealthBar(
@@ -103,9 +112,21 @@ export class EntitySync {
     );
     this.game.scene.add(hpBar.mesh);
 
+    // fliers get a soft ground blob so altitude reads from the top-down cam
+    let blob = null;
+    if (mesh.userData.wingPivots) {
+      blob = new THREE.Mesh(
+        new THREE.CircleGeometry(radius * 0.9, 20),
+        new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.22, depthWrite: false })
+      );
+      blob.rotation.x = -Math.PI / 2;
+      this.game.scene.add(blob);
+    }
+
     return {
-      type: m.type, mesh, hpBar,
-      target: new THREE.Vector3(m.x, 0, m.z), facing: m.facing,
+      type: m.type, mesh, hpBar, blob,
+      target: new THREE.Vector3(m.x, m.y || 0, m.z), facing: m.facing,
+      pitch: m.pitch || 0, loaded: m.loaded !== false, wingAge: Math.random() * 10,
       hp: m.hp, maxHp: m.maxHp, displayHp: m.hp,
       barOffsetY: radius * 2.1 + 0.35,
     };
@@ -122,6 +143,28 @@ export class EntitySync {
     v.hpBar.mesh.geometry.dispose();
     v.hpBar.mesh.material.dispose();
     v.hpBar.texture.dispose();
+    if (v.blob) {
+      this.game.scene.remove(v.blob);
+      v.blob.geometry.dispose();
+      v.blob.material.dispose();
+    }
+  }
+
+  // ---- hornet missiles ----
+
+  createMissile(mi) {
+    const scale = RARITIES[mi.rarity]?.scale ?? 1;
+    const mesh = makeMissileMesh(0.45 * scale);
+    mesh.position.set(mi.x, mi.y, mi.z);
+    mesh.rotation.set(mi.pitch, mi.yaw, 0, 'YXZ');
+    this.game.scene.add(mesh);
+    return { mesh, target: new THREE.Vector3(mi.x, mi.y, mi.z) };
+  }
+
+  removeMissile(v) {
+    this.game.scene.remove(v.mesh);
+    // cone geometry is cached/shared across missiles of the same size
+    disposeMaterials(v.mesh);
   }
 
   // ---- petals ----
@@ -167,9 +210,24 @@ export class EntitySync {
 
     for (const v of this.mobs.values()) {
       v.mesh.position.lerp(v.target, damp(10, dt));
-      const q = new THREE.Quaternion().setFromAxisAngle(UP, v.facing);
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(v.pitch || 0, v.facing, 0, 'YXZ'));
       v.mesh.quaternion.slerp(q, damp(6, dt));
       updateFlash(v.mesh);
+
+      const wings = v.mesh.userData.wingPivots;
+      if (wings) {
+        v.wingAge += dt;
+        // fast small-amplitude flap reads as a wing blur, not a slow wave
+        const flap = 0.35 + Math.sin(v.wingAge * 42) * 0.4;
+        for (const pivot of wings) pivot.rotation.z = flap;
+        if (v.mesh.userData.missile) v.mesh.userData.missile.visible = v.loaded;
+        if (v.blob) {
+          const alt = Math.max(0, v.mesh.position.y);
+          v.blob.position.set(v.mesh.position.x, 0.04, v.mesh.position.z);
+          v.blob.scale.setScalar(Math.max(0.4, 1 - alt * 0.05));
+          v.blob.material.opacity = Math.max(0.08, 0.26 - alt * 0.018);
+        }
+      }
 
       v.displayHp += (v.hp - v.displayHp) * damp(3, dt);
       v.hpBar.draw(v.hp / v.maxHp, v.displayHp / v.maxHp);
@@ -188,6 +246,10 @@ export class EntitySync {
       if (!v.mesh.visible) continue;
       v.mesh.position.lerp(new THREE.Vector3(v.target.x, 1.1, v.target.z), damp(12, dt));
       v.mesh.rotation.y += dt * 1.5;
+    }
+
+    for (const v of this.missiles.values()) {
+      v.mesh.position.lerp(v.target, damp(16, dt));
     }
 
     for (const v of this.drops.values()) {

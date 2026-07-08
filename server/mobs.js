@@ -2,7 +2,23 @@ import * as THREE from 'three';
 import {
   MOB_TYPES, RARITIES, MOB_CAP, ARENA_HALF, clampToArena, pickRarity, pickDrop,
 } from '../shared/config.js';
-import { uid } from './utils.js';
+import { uid, damp } from './utils.js';
+
+// Hornet flight tuning. The attack rhythm is: hover out of reach and lob
+// missiles (dodgeable / shootable), then dive low in a telegraphed strafing
+// run to "rearm" — that swoop is the player's window to hit back.
+const HORNET = {
+  aggroRange: 30,
+  cruiseAlt: 6.5,   // passive drift altitude
+  volleyAlt: 7,     // firing altitude
+  swoopAlt: 0.6,    // low pass, within petal/body reach
+  standoff: 13,     // preferred horizontal distance while firing
+  fireRange: 45,
+  fireInterval: 2.2,
+  regrowTime: 0.9,  // missile visibly regrows on the tail after firing
+  swoopSpeedMult: 3.1,
+  swoopMaxTime: 4.5,
+};
 
 class Mob {
   constructor(game, type, rarityIdx, pos) {
@@ -29,6 +45,14 @@ class Mob {
     this.knock = new THREE.Vector3();
     this.hitCooldowns = new Map();
     this.deadFlag = false;
+
+    if (this.type === 'hornet') {
+      this.pos.y = HORNET.cruiseAlt; // spawns already airborne
+      this.pitch = 0;
+      this.loaded = true; // missile visibly docked on the tail
+      this.strafeDir = Math.random() < 0.5 ? 1 : -1;
+      this.flight = { state: 'cruise', shots: 0, fireTimer: 0, regrow: 0, timer: 0, target: new THREE.Vector3() };
+    }
   }
 
   damage(amount, source = null) {
@@ -57,6 +81,15 @@ class Mob {
   }
 
   update(dt) {
+    if (this.type === 'hornet') this.updateHornet(dt);
+    else this.updateGround(dt);
+
+    this.pos.addScaledVector(this.knock, dt);
+    this.knock.multiplyScalar(Math.exp(-6 * dt));
+    clampToArena(this.pos, this.radius);
+  }
+
+  updateGround(dt) {
     const player = this.game.player;
     let vel = new THREE.Vector3();
 
@@ -91,11 +124,100 @@ class Mob {
       this.pos.addScaledVector(vel, dt);
     }
 
-    this.pos.addScaledVector(this.knock, dt);
-    this.knock.multiplyScalar(Math.exp(-6 * dt));
-    clampToArena(this.pos, this.radius);
-
     if (vel.lengthSq() > 0.01) this.facing = Math.atan2(vel.x, vel.z);
+  }
+
+  // Flying state machine: cruise (passive drift, high up) -> volley (hold a
+  // standoff ring, flip 180°, lob missiles) -> swoop (dive through the
+  // player at petal height — the punish window) -> back to volley/cruise.
+  updateHornet(dt) {
+    const player = this.game.player;
+    const f = this.flight;
+    const toPlayer = player.pos.clone().sub(this.pos).setY(0);
+    const hDist = toPlayer.length();
+    if (hDist > 0.01) toPlayer.multiplyScalar(1 / hDist);
+
+    if (player.dead) {
+      this.aggro = false;
+      f.state = 'cruise';
+    } else if (hDist < HORNET.aggroRange) {
+      this.aggro = true; // hornets are aggressive on sight, not just on hit
+    }
+
+    let vel = new THREE.Vector3();
+    let altTarget = HORNET.cruiseAlt;
+    let altRate = 2.2;
+
+    if (f.state === 'cruise') {
+      this.wanderTimer -= dt;
+      if (this.wanderTimer <= 0) {
+        this.wanderTimer = 2 + Math.random() * 3;
+        this.heading = Math.random() * Math.PI * 2;
+      }
+      vel.set(Math.sin(this.heading), 0, Math.cos(this.heading)).multiplyScalar(this.speed);
+      this.facing = Math.atan2(vel.x, vel.z);
+      if (this.aggro) {
+        f.state = 'volley';
+        f.shots = 2 + this.rarity; // rarer hornets fire longer volleys
+        f.fireTimer = 1.2;
+      }
+    } else if (f.state === 'volley') {
+      altTarget = HORNET.volleyAlt;
+      // hold the standoff ring: close in, back off, or orbit sideways
+      const inRing = hDist < HORNET.standoff + 2;
+      if (!inRing) {
+        vel.copy(toPlayer).multiplyScalar(this.speed * 1.6);
+      } else if (hDist < HORNET.standoff - 2) {
+        vel.copy(toPlayer).multiplyScalar(-this.speed * 1.6);
+      } else {
+        vel.set(-toPlayer.z, 0, toPlayer.x).multiplyScalar(this.speed * 0.7 * this.strafeDir);
+      }
+      // approach nose-first; the florr-authentic 180° flip (tail and missile
+      // toward the player) only happens inside the ring, so the spin reads
+      // as a deliberate wind-up right before firing
+      this.facing = inRing
+        ? Math.atan2(-toPlayer.x, -toPlayer.z)
+        : Math.atan2(toPlayer.x, toPlayer.z);
+
+      f.regrow -= dt;
+      if (f.regrow <= 0) this.loaded = true;
+      f.fireTimer -= dt;
+      if (f.fireTimer <= 0 && this.loaded && inRing && hDist < HORNET.fireRange) {
+        this.game.mobs.fireMissile(this);
+        this.loaded = false;
+        f.regrow = HORNET.regrowTime;
+        f.fireTimer = HORNET.fireInterval;
+        f.shots--;
+        if (f.shots <= 0) {
+          f.state = 'swoop';
+          f.timer = HORNET.swoopMaxTime;
+          // dive through the player's position and 12 units past it
+          f.target.copy(player.pos).addScaledVector(toPlayer, 12).setY(0);
+        }
+      }
+    } else { // swoop
+      altTarget = HORNET.swoopAlt;
+      altRate = 3.2; // dive and pull up harder than normal climb
+      const toTarget = f.target.clone().sub(this.pos).setY(0);
+      const dist = toTarget.length();
+      if (dist > 0.01) vel.copy(toTarget.multiplyScalar(1 / dist)).multiplyScalar(this.speed * HORNET.swoopSpeedMult);
+      this.facing = Math.atan2(vel.x, vel.z);
+      f.timer -= dt;
+      if (dist < 2.5 || f.timer <= 0) {
+        f.state = this.aggro ? 'volley' : 'cruise';
+        f.shots = 2 + this.rarity;
+        f.fireTimer = 1.4;
+      }
+    }
+
+    this.pos.addScaledVector(vel, dt);
+    const prevY = this.pos.y;
+    this.pos.y += (altTarget - this.pos.y) * damp(altRate, dt);
+
+    // nose follows the actual velocity: down when diving, up when climbing
+    const vy = (this.pos.y - prevY) / Math.max(dt, 1e-6);
+    const targetPitch = Math.atan2(-vy, Math.max(vel.length(), 2));
+    this.pitch += (targetPitch - this.pitch) * damp(6, dt);
   }
 }
 
@@ -103,8 +225,26 @@ export class MobManager {
   constructor(game) {
     this.game = game;
     this.mobs = [];
+    this.missiles = [];
     this.spawnTimer = 0;
     for (let i = 0; i < 16; i++) this.trySpawn(true);
+  }
+
+  // weighted type pick: types without a spawnWeight count as 1; types at
+  // their maxAlive cap are excluded from the roll entirely
+  pickType() {
+    const alive = {};
+    for (const m of this.mobs) alive[m.type] = (alive[m.type] || 0) + 1;
+    const entries = Object.entries(MOB_TYPES)
+      .filter(([type, def]) => !def.maxAlive || (alive[type] || 0) < def.maxAlive);
+    let total = 0;
+    for (const [, def] of entries) total += def.spawnWeight ?? 1;
+    let r = Math.random() * total;
+    for (const [type, def] of entries) {
+      r -= def.spawnWeight ?? 1;
+      if (r <= 0) return type;
+    }
+    return entries[0][0];
   }
 
   trySpawn(initial = false) {
@@ -117,11 +257,34 @@ export class MobManager {
       );
       const dist = pos.distanceTo(player.pos);
       if (dist < 30 || (!initial && dist > 130)) continue;
-      const types = Object.keys(MOB_TYPES);
-      const type = types[Math.floor(Math.random() * types.length)];
-      this.mobs.push(new Mob(this.game, type, pickRarity(), pos));
+      this.mobs.push(new Mob(this.game, this.pickType(), pickRarity(), pos));
       return;
     }
+  }
+
+  // launch the hornet's tail missile at the player's current position;
+  // it flies a straight line, so the lob is dodgeable by moving
+  fireMissile(hornet) {
+    const r = RARITIES[hornet.rarity];
+    const mdef = hornet.def.missile;
+    const player = this.game.player;
+    const target = new THREE.Vector3(player.pos.x, 1.1, player.pos.z);
+    const aim = target.clone().sub(hornet.pos).setY(0).normalize();
+    const origin = hornet.pos.clone().addScaledVector(aim, hornet.radius * 1.2);
+    const vel = target.sub(origin).normalize().multiplyScalar(mdef.speed);
+    this.missiles.push({
+      id: uid(),
+      pos: origin,
+      vel,
+      radius: mdef.radius * r.scale,
+      hp: mdef.hp * r.statMult,
+      dmg: mdef.dmg * r.dmgMult,
+      rarity: hornet.rarity,
+      life: 4,
+      yaw: Math.atan2(vel.x, vel.z),
+      pitch: Math.atan2(-vel.y, Math.hypot(vel.x, vel.z)),
+      dead: false,
+    });
   }
 
   update(dt) {
@@ -149,5 +312,15 @@ export class MobManager {
     }
 
     this.mobs = this.mobs.filter((m) => !m.deadFlag);
+
+    for (const mi of this.missiles) {
+      mi.pos.addScaledVector(mi.vel, dt);
+      mi.life -= dt;
+      if (mi.life <= 0 || mi.pos.y <= 0.05 ||
+          Math.max(Math.abs(mi.pos.x), Math.abs(mi.pos.z)) > ARENA_HALF + 4) {
+        mi.dead = true;
+      }
+    }
+    this.missiles = this.missiles.filter((m) => !m.dead);
   }
 }

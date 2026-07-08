@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { HIT_COOLDOWN, PLAYER_BODY_DAMAGE } from '../shared/config.js';
 
 // per-pair damage tick limiter, stored on the entity that owns the map
@@ -39,6 +40,41 @@ export function updateCombat(game, dt) {
           petal.hp -= mob.dmg;
           if (petal.hp <= 0) game.petals.destroyInstance(petal);
           if (mob.deadFlag) break;
+        }
+      }
+    }
+  }
+
+  // hornet missiles: hit the player, or get shot down by petals. The flower
+  // body and orbiting petals both live visually at y=1.1, so collisions test
+  // against that height rather than the server's ground-level positions.
+  const hitPoint = new THREE.Vector3();
+  for (const mi of game.mobs.missiles) {
+    if (mi.dead) continue;
+
+    if (!player.dead) {
+      hitPoint.set(player.pos.x, 1.1, player.pos.z);
+      if (mi.pos.distanceTo(hitPoint) < mi.radius + player.radius) {
+        player.damage(mi.dmg);
+        mi.dead = true;
+        continue;
+      }
+    }
+
+    for (const petal of game.petals.instances) {
+      if (!petal.alive) continue;
+      hitPoint.set(petal.pos.x, 1.1, petal.pos.z);
+      if (mi.pos.distanceTo(hitPoint) < mi.radius + petal.radius) {
+        petal.hp -= mi.dmg;
+        mi.hp -= petal.dmg;
+        game.events.push({
+          e: 'dmg', a: Math.round(petal.dmg),
+          x: Math.round(mi.pos.x * 100) / 100, z: Math.round(mi.pos.z * 100) / 100,
+        });
+        if (petal.hp <= 0) game.petals.destroyInstance(petal);
+        if (mi.hp <= 0) {
+          mi.dead = true;
+          break;
         }
       }
     }

@@ -115,6 +115,13 @@ export class Game {
         id: m.id, type: m.type, rarity: m.rarity,
         x: r2(m.pos.x), z: r2(m.pos.z), facing: r2(m.facing),
         hp: r2(m.hp), maxHp: r2(m.maxHp),
+        // flight fields only exist for airborne mobs (hornet)
+        ...(m.flight ? { y: r2(m.pos.y), pitch: r2(m.pitch), loaded: m.loaded } : {}),
+      })),
+      missiles: this.mobs.missiles.map((mi) => ({
+        id: mi.id, rarity: mi.rarity,
+        x: r2(mi.pos.x), y: r2(mi.pos.y), z: r2(mi.pos.z),
+        yaw: r2(mi.yaw), pitch: r2(mi.pitch),
       })),
       drops: this.drops.drops.map((d) => ({
         id: d.id, type: d.type, rarity: d.rarity, x: r2(d.pos.x), z: r2(d.pos.z),

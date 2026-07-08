@@ -142,6 +142,104 @@ function makeBeeMob(radius) {
   return group;
 }
 
+// Hornet: elongated warm-yellow ellipsoid with wide black stripes, curved
+// antennae, a black missile docked on the tail (hidden while reloading), and
+// translucent flutter wings — the wings + banking are what make it read as
+// flying rather than floating. Forward is +Z, matching `facing`.
+const HORNET_YELLOW = '#ffd363';
+
+function makeHornetMob(radius) {
+  const group = new THREE.Group();
+  const lift = radius * 0.8; // so a swooping hornet sits on the ground like other mobs
+  const a = radius * 0.75;   // ellipsoid x/y radius
+  const c = radius * 1.3;    // ellipsoid z radius
+
+  const bodyGeo = sharedGeo('hornet-body', () => new THREE.SphereGeometry(1, 24, 18));
+  const body = new THREE.Mesh(bodyGeo, toonMat(HORNET_YELLOW));
+  body.scale.set(a, a * 0.9, c);
+  addOutline(body, 0.12, '#c9962a'); // florr's dark-yellow outline
+  body.position.y = lift;
+  group.add(body);
+
+  const stripeMat = toonMat(BLACK);
+  const tube = radius * 0.2;
+  for (const zFrac of [-0.42, 0.08, 0.52]) {
+    const z = zFrac * c;
+    const surfaceR = a * Math.sqrt(Math.max(0.05, 1 - (z / c) ** 2));
+    const ringR = Math.max(0.05, surfaceR - tube * 0.9);
+    const ringGeo = sharedGeo(`hornet-ring-${radius}-${zFrac}`, () => new THREE.TorusGeometry(ringR, tube, 10, 28));
+    const ring = new THREE.Mesh(ringGeo, stripeMat);
+    ring.position.set(0, lift, z);
+    group.add(ring);
+  }
+
+  const antGeo = sharedGeo(`hornet-ant-${radius}`, () => new THREE.CylinderGeometry(0.045, 0.045, radius * 0.75, 6));
+  const antTipGeo = sharedGeo(`hornet-anttip-${radius}`, () => new THREE.SphereGeometry(radius * 0.1, 8, 6));
+  for (const sx of [-1, 1]) {
+    const ant = new THREE.Mesh(antGeo, stripeMat);
+    ant.rotation.x = 0.95;
+    ant.rotation.z = -sx * 0.4;
+    ant.position.set(sx * radius * 0.3, lift + a * 0.7, c * 0.72);
+    group.add(ant);
+    const tip = new THREE.Mesh(antTipGeo, stripeMat);
+    tip.position.set(sx * radius * 0.48, lift + a * 0.92, c * 0.92);
+    group.add(tip);
+  }
+
+  // the docked missile — toggled by the server's `loaded` flag so players
+  // can see whether the hornet has a shot ready
+  const missileGeo = sharedGeo(`hornet-missile-${radius}`, () => new THREE.ConeGeometry(radius * 0.28, radius * 1.15, 10));
+  const missile = new THREE.Mesh(missileGeo, stripeMat);
+  missile.rotation.x = -Math.PI / 2; // point toward -Z (out the tail)
+  missile.position.set(0, lift, -c - radius * 0.35);
+  group.add(missile);
+  group.userData.missile = missile;
+
+  enableShadows(group, { cast: true, receive: true });
+
+  // wings go on after enableShadows: translucent planes shouldn't cast solid
+  // shadows. Root of each wing is at its pivot, blade extends +X, so the
+  // pivot's rotation.z flaps it; the right pivot is yaw-mirrored.
+  const wingGeo = sharedGeo(`hornet-wing-${radius}`, () => {
+    const geo = new THREE.CircleGeometry(1, 14);
+    geo.translate(1, 0, 0);
+    return geo;
+  });
+  const wingMat = new THREE.MeshBasicMaterial({
+    color: '#dcecf5', transparent: true, opacity: 0.5,
+    side: THREE.DoubleSide, depthWrite: false,
+  });
+  const wingPivots = [];
+  for (const sx of [-1, 1]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(sx * radius * 0.12, lift + a * 0.85, c * 0.05);
+    pivot.rotation.y = sx === 1 ? -0.5 : Math.PI + 0.5; // sweep both wings back
+    const wing = new THREE.Mesh(wingGeo, wingMat);
+    wing.rotation.x = -Math.PI / 2; // lay the blade flat
+    wing.scale.set(radius * 0.85, radius * 0.36, 1);
+    pivot.add(wing);
+    group.add(pivot);
+    wingPivots.push(pivot);
+  }
+  group.userData.wingPivots = wingPivots;
+
+  return group;
+}
+
+// Hornet missile projectile: black cone flying nose-first along +Z.
+export function makeMissileMesh(radius) {
+  const group = new THREE.Group();
+  const cone = new THREE.Mesh(
+    sharedGeo(`missile-${radius}`, () => new THREE.ConeGeometry(radius * 0.62, radius * 2.6, 10)),
+    toonMat(BLACK)
+  );
+  cone.rotation.x = Math.PI / 2; // +Y tip -> +Z forward
+  addOutline(cone, 0.15, '#000000');
+  group.add(cone);
+  enableShadows(group, { cast: true, receive: false });
+  return group;
+}
+
 const BAR_HEIGHT = 0.26;  // world units
 const BAR_CANVAS_H = 48;  // canvas px; width follows the bar's world aspect
 
@@ -219,6 +317,7 @@ export function makeMobMesh(type, radius) {
   if (type === 'rock') return makeRockMob(radius);
   if (type === 'ladybug') return makeLadybugMob(radius);
   if (type === 'bee') return makeBeeMob(radius);
+  if (type === 'hornet') return makeHornetMob(radius);
   throw new Error(`unknown mob type ${type}`);
 }
 

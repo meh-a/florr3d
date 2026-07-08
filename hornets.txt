@@ -1,0 +1,13 @@
+The Hornet looks like an oval with black and yellow stripes and a dark yellow outline. It has two antennae at the front, which appear as slightly curved black lines. It also has a Missile at the back.
+
+Speed: Slow when passive, Normal when aggressive.
+
+Behavior: When firing at the player, hornets turn 180 degrees and fire the "missile" attached to their body.
+
+The stats here are for the common hornet, scale as needed.
+
+health: 62.5
+damage: 50
+Armor: 1
+Missile hp: 5
+Missile damage: 10
