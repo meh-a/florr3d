@@ -9,8 +9,11 @@ import { uid, damp } from './utils.js';
 // run to "rearm" — that swoop is the player's window to hit back.
 const HORNET = {
   aggroRange: 30,
-  cruiseAlt: 6.5,   // passive drift altitude
-  volleyAlt: 7,     // firing altitude
+  // altitudes are clearance above the mob's own radius — a giant Ultra
+  // hornet must hover proportionally higher or its huge contact range
+  // would reach the ground while it's supposedly out of reach
+  cruiseAlt: 5,     // passive drift clearance
+  volleyAlt: 5.5,   // firing clearance
   swoopAlt: 0.6,    // low pass, within petal/body reach
   standoff: 13,     // preferred horizontal distance while firing
   fireRange: 45,
@@ -47,7 +50,7 @@ class Mob {
     this.deadFlag = false;
 
     if (this.type === 'hornet') {
-      this.pos.y = HORNET.cruiseAlt; // spawns already airborne
+      this.pos.y = HORNET.cruiseAlt + this.radius; // spawns already airborne
       this.pitch = 0;
       this.loaded = true; // missile visibly docked on the tail
       this.strafeDir = Math.random() < 0.5 ? 1 : -1;
@@ -145,7 +148,7 @@ class Mob {
     }
 
     let vel = new THREE.Vector3();
-    let altTarget = HORNET.cruiseAlt;
+    let altTarget = HORNET.cruiseAlt + this.radius;
     let altRate = 2.2;
 
     if (f.state === 'cruise') {
@@ -162,7 +165,7 @@ class Mob {
         f.fireTimer = 1.2;
       }
     } else if (f.state === 'volley') {
-      altTarget = HORNET.volleyAlt;
+      altTarget = HORNET.volleyAlt + this.radius;
       // hold the standoff ring: close in, back off, or orbit sideways
       const inRing = hDist < HORNET.standoff + 2;
       if (!inRing) {

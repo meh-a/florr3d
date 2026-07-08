@@ -45,6 +45,21 @@ export function updateCombat(game, dt) {
     }
   }
 
+  // player missile projectiles vs mobs. Projectiles fly in the ground plane
+  // (y=0, like all petal combat), so a mob's altitude counts against the
+  // hit: airborne hornets are only reachable during their swoop.
+  for (const proj of game.petals.projectiles) {
+    if (proj.dead) continue;
+    for (const mob of game.mobs.mobs) {
+      if (mob.deadFlag) continue;
+      if (proj.pos.distanceTo(mob.pos) < proj.radius + mob.radius) {
+        mob.damage(proj.dmg, proj.pos);
+        proj.dead = true;
+        break;
+      }
+    }
+  }
+
   // hornet missiles: hit the player, or get shot down by petals. The flower
   // body and orbiting petals both live visually at y=1.1, so collisions test
   // against that height rather than the server's ground-level positions.

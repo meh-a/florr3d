@@ -16,7 +16,8 @@ export class EntitySync {
     this.mobs = new Map();     // id -> view
     this.petals = new Map();   // id -> view
     this.drops = new Map();    // id -> view
-    this.missiles = new Map(); // id -> view
+    this.missiles = new Map();  // id -> view (hornet missiles)
+    this.pmissiles = new Map(); // id -> view (player-fired petals)
 
     this.playerMesh = makeFlower(PLAYER_RADIUS);
     this.playerMesh.position.set(0, PLAYER_RADIUS, 0);
@@ -47,6 +48,11 @@ export class EntitySync {
       (v, mi) => {
         v.target.set(mi.x, mi.y, mi.z);
         v.mesh.rotation.set(mi.pitch, mi.yaw, 0, 'YXZ');
+      });
+
+    this.syncCollection(this.pmissiles, state.pmissiles || [], (p) => this.createPlayerMissile(p), (v) => this.removePetal(v),
+      (v, p) => {
+        v.target.set(p.x, 1.1, p.z);
       });
 
     this.syncCollection(this.petals, state.petals.instances, (p) => this.createPetal(p), (v) => this.removePetal(v),
@@ -182,6 +188,16 @@ export class EntitySync {
     disposeObject3D(v.mesh);
   }
 
+  // a fired missile petal in flight: same mesh as the petal, nose along yaw
+  createPlayerMissile(p) {
+    const size = PETAL_TYPES[p.type].radius * (1 + p.rarity * 0.12);
+    const mesh = makePetalMesh(p.type, size * 1.15);
+    mesh.position.set(p.x, 1.1, p.z);
+    mesh.rotation.y = p.yaw;
+    this.game.scene.add(mesh);
+    return { mesh, target: new THREE.Vector3(p.x, 1.1, p.z) };
+  }
+
   // ---- drops ----
 
   createDrop(d) {
@@ -249,6 +265,10 @@ export class EntitySync {
     }
 
     for (const v of this.missiles.values()) {
+      v.mesh.position.lerp(v.target, damp(16, dt));
+    }
+
+    for (const v of this.pmissiles.values()) {
       v.mesh.position.lerp(v.target, damp(16, dt));
     }
 

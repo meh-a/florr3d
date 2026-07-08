@@ -1,13 +1,14 @@
-// Rarity table. statMult follows florr's mob/petal scaling (Common x3.75 = Unusual,
-// Unusual x3.6 = Rare, Rare x4 = Epic, Epic x6 = Legendary). dmgMult is a gentler
-// curve used for mob contact damage so higher rarities are dangerous but not
-// guaranteed one-shots.
+// Rarity table. statMult for mob/petal stats is a flat x3 per tier. dmgMult
+// is a gentler curve used for mob contact damage so higher rarities are
+// dangerous but not guaranteed one-shots (though Mythic and Ultra get close).
 export const RARITIES = [
-  { name: 'Common',    color: '#7eef6d', statMult: 1,    dmgMult: 1,    weight: 55, scale: 1.0  },
-  { name: 'Unusual',   color: '#ffe65d', statMult: 3.75, dmgMult: 1.8,  weight: 25, scale: 1.2  },
-  { name: 'Rare',      color: '#4d52e3', statMult: 13.5, dmgMult: 3.2,  weight: 12, scale: 1.45 },
-  { name: 'Epic',      color: '#861fde', statMult: 54,   dmgMult: 5.6,  weight: 6,  scale: 1.75 },
-  { name: 'Legendary', color: '#de1f1f', statMult: 324,  dmgMult: 10,   weight: 2,  scale: 2.1  },
+  { name: 'Common',    color: '#7eef6d', statMult: 1,   dmgMult: 1,    weight: 55,   scale: 1.0  },
+  { name: 'Unusual',   color: '#ffe65d', statMult: 3,   dmgMult: 1.8,  weight: 25,   scale: 1.3  },
+  { name: 'Rare',      color: '#4d52e3', statMult: 9,   dmgMult: 3.2,  weight: 12,   scale: 1.7  },
+  { name: 'Epic',      color: '#861fde', statMult: 27,  dmgMult: 5.6,  weight: 6,    scale: 2.2  },
+  { name: 'Legendary', color: '#de1f1f', statMult: 81,  dmgMult: 10,   weight: 2,    scale: 3.0  },
+  { name: 'Mythic',    color: '#1fdbde', statMult: 243, dmgMult: 17.5, weight: 0.4,  scale: 4.2  },
+  { name: 'Ultra',     color: '#ff2b75', statMult: 729, dmgMult: 30,   weight: 0.08, scale: 5.5  },
 ];
 
 // drops: [petalType|null, weight]
@@ -26,7 +27,7 @@ export const MOB_TYPES = {
   },
   hornet: {
     name: 'Hornet', hp: 62.5, dmg: 50, armor: 1, radius: 1.7, speed: 2.0, xp: 12,
-    drops: [[null, 1]], // TODO: hornet drops (missile petal?) come later
+    drops: [['missile', 0.35], ['orange', 0.35], [null, 0.3]],
     // rarer spawn than the basic mobs, and never more than a few alive at
     // once — it's much more dangerous
     spawnWeight: 0.35,
@@ -41,6 +42,10 @@ export const PETAL_TYPES = {
   rose:      { name: 'Rose',    hp: 5,  dmg: 5,  reload: 3.5, radius: 0.42, count: 1, color: '#ff94c9', heal: 11 },
   light:     { name: 'Light',   hp: 5,  dmg: 7,  reload: 0.6, radius: 0.28, count: 3, color: '#ffffff' },
   stinger:   { name: 'Stinger', hp: 8,  dmg: 35, reload: 4,   radius: 0.35, count: 1, color: '#333333' },
+  orange:    { name: 'Orange',  hp: 6.6, dmg: 8, reload: 1,   radius: 0.3,  count: 3, color: '#eb9c2d' },
+  // fired as a straight-line projectile while attacking, florr's legacy petal
+  missile:   { name: 'Missile', hp: 2,  dmg: 35, reload: 3,   radius: 0.4,  count: 1, color: '#333333',
+               projectile: { speed: 24, life: 1.8 } },
 };
 
 export const ARENA_HALF = 145;       // playable half-extent; ground drawn a bit larger

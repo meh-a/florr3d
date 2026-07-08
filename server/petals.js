@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PETAL_TYPES, RARITIES } from '../shared/config.js';
+import { PETAL_TYPES, RARITIES, ARENA_HALF } from '../shared/config.js';
 import { uid, damp } from './utils.js';
 
 const SLOTS = 5;
@@ -18,10 +18,35 @@ export class PetalManager {
     this.primary = Array.from({ length: SLOTS }, () => ({ type: 'basic', rarity: 0 }));
     this.secondary = Array.from({ length: SLOTS }, () => null);
     this.instances = [];
+    this.projectiles = []; // in-flight player missiles
     this.rot = 0;
     this.rotFactor = 1;
     this.radius = ORBIT_NEUTRAL;
     this.rebuildAll();
+  }
+
+  // Missile-type petals launch off the orbit while attacking: the petal
+  // flies out along its orbit direction as a straight projectile and the
+  // slot goes on reload, like losing the petal in florr. Server y stays 0
+  // (same plane as all petal combat); the client draws it at flower height.
+  fireProjectile(inst) {
+    const dir = inst.pos.clone().sub(this.player.pos).setY(0);
+    if (dir.lengthSq() < 0.25) return; // not visibly extended yet
+    dir.normalize();
+    const def = PETAL_TYPES[inst.type].projectile;
+    this.projectiles.push({
+      id: uid(),
+      type: inst.type,
+      rarity: inst.rarity,
+      pos: inst.pos.clone().setY(0),
+      vel: dir.multiplyScalar(def.speed),
+      radius: inst.radius,
+      dmg: inst.dmg,
+      life: def.life,
+      yaw: Math.atan2(dir.x, dir.z),
+      dead: false,
+    });
+    this.destroyInstance(inst);
   }
 
   changeRotSpeed(delta) {
@@ -125,6 +150,21 @@ export class PetalManager {
       } else {
         inst.pos.lerp(target, damp(12, dt));
       }
+
+      // missiles launch once the attack orbit has visibly extended
+      if (PETAL_TYPES[inst.type].projectile && input.atk && this.radius > 3.6) {
+        this.fireProjectile(inst);
+      }
     }
+
+    for (const proj of this.projectiles) {
+      proj.pos.addScaledVector(proj.vel, dt);
+      proj.life -= dt;
+      if (proj.life <= 0 ||
+          Math.max(Math.abs(proj.pos.x), Math.abs(proj.pos.z)) > ARENA_HALF + 4) {
+        proj.dead = true;
+      }
+    }
+    this.projectiles = this.projectiles.filter((proj) => !proj.dead);
   }
 }

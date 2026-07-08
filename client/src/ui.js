@@ -4,6 +4,8 @@ import rockIcon from '../assets/rock.svg';
 import roseIcon from '../assets/rose.svg';
 import lightIcon from '../assets/light.svg';
 import stingerIcon from '../assets/stinger.svg';
+import orangeIcon from '../assets/orange.svg';
+import missileIcon from '../assets/missile.svg';
 
 // darker shade of a rarity color for slot/tile borders, like florr
 function shade(hex, f = 0.72) {
@@ -19,6 +21,8 @@ const PETAL_ICONS = {
   rose: roseIcon,
   light: lightIcon,
   stinger: stingerIcon,
+  orange: orangeIcon,
+  missile: missileIcon,
 };
 
 // HUD driven entirely by server snapshots. Inventory and loadout live on the

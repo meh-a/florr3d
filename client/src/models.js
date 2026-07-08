@@ -331,6 +331,19 @@ export function makePetalMesh(type, radius) {
   } else if (type === 'stinger') {
     mesh = new THREE.Mesh(new THREE.ConeGeometry(radius * 0.9, radius * 2, 3), toonMat(def.color));
     mesh.rotation.x = Math.PI / 2;
+  } else if (type === 'missile') {
+    // like the stinger's dark triangle but wider and flatter, per florr
+    mesh = new THREE.Mesh(new THREE.ConeGeometry(radius * 1.1, radius * 2.3, 3), toonMat(def.color));
+    mesh.scale.set(1, 1, 0.55); // local z flattens to world-vertical after the rotation
+    mesh.rotation.x = Math.PI / 2;
+  } else if (type === 'orange') {
+    mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 12), toonMat(def.color));
+    // single almond-shaped leaf resting on top of the orange
+    const leaf = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.6, 10, 8), toonMat('#35a83c'));
+    leaf.scale.set(1, 0.32, 0.55);
+    leaf.position.set(radius * 0.35, radius * 0.8, 0);
+    leaf.rotation.z = -0.55;
+    mesh.add(leaf);
   } else {
     mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 12), toonMat(def.color));
   }

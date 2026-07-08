@@ -123,6 +123,10 @@ export class Game {
         x: r2(mi.pos.x), y: r2(mi.pos.y), z: r2(mi.pos.z),
         yaw: r2(mi.yaw), pitch: r2(mi.pitch),
       })),
+      pmissiles: this.petals.projectiles.map((proj) => ({
+        id: proj.id, type: proj.type, rarity: proj.rarity,
+        x: r2(proj.pos.x), z: r2(proj.pos.z), yaw: r2(proj.yaw),
+      })),
       drops: this.drops.drops.map((d) => ({
         id: d.id, type: d.type, rarity: d.rarity, x: r2(d.pos.x), z: r2(d.pos.z),
       })),
