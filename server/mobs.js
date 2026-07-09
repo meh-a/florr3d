@@ -34,7 +34,7 @@ class Mob {
     this.maxHp = this.def.hp * r.statMult;
     this.hp = this.maxHp;
     this.dmg = this.def.dmg * r.dmgMult;
-    this.armor = this.def.armor * (1 + rarityIdx);
+    this.armor = this.def.armor * r.armorMult;
     this.radius = this.def.radius * r.scale;
     this.speed = this.def.speed;
     this.xp = this.def.xp * r.statMult;

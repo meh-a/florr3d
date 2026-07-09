@@ -46,6 +46,16 @@ export class UI {
       death: document.getElementById('death'),
       deathTimer: document.getElementById('deathtimer'),
       toasts: document.getElementById('toasts'),
+      tooltip: document.getElementById('tooltip'),
+    };
+    this.tt = {
+      name: this.el.tooltip.querySelector('.tt-name'),
+      reload: this.el.tooltip.querySelector('.tt-reload'),
+      rarity: this.el.tooltip.querySelector('.tt-rarity'),
+      desc: this.el.tooltip.querySelector('.tt-desc'),
+      health: this.el.tooltip.querySelector('.tt-health'),
+      damage: this.el.tooltip.querySelector('.tt-damage'),
+      heal: this.el.tooltip.querySelector('.tt-heal'),
     };
   }
 
@@ -56,11 +66,13 @@ export class UI {
     if (loadoutKey !== this.loadoutKey) {
       this.loadoutKey = loadoutKey;
       this.renderLoadout();
+      this.hideTooltip(); // the hovered element's slot may just have been rebuilt
     }
     const inventoryKey = JSON.stringify(state.inventory);
     if (inventoryKey !== this.inventoryKey) {
       this.inventoryKey = inventoryKey;
       this.renderInventory();
+      this.hideTooltip();
     }
 
     const p = state.player;
@@ -116,6 +128,15 @@ export class UI {
         this.selected = this.selected === key ? null : key;
         this.renderInventory();
       };
+      tile.draggable = true;
+      tile.ondragstart = (e) => {
+        e.dataTransfer.setData('text/plain', key);
+        e.dataTransfer.effectAllowed = 'move';
+        tile.classList.add('dragging');
+      };
+      tile.ondragend = () => tile.classList.remove('dragging');
+      tile.onmouseenter = () => this.showTooltip(tile, type, rarity);
+      tile.onmouseleave = () => this.hideTooltip();
       this.el.inventory.appendChild(tile);
     }
   }
@@ -141,6 +162,8 @@ export class UI {
         slot.innerHTML = icon
           ? `<img class="picon" src="${icon}" alt="${def.name}" />`
           : `<div class="dot" style="background:${def.color}"></div><div class="pname">${def.name}</div>`;
+        slot.onmouseenter = () => this.showTooltip(slot, item.type, item.rarity);
+        slot.onmouseleave = () => this.hideTooltip();
       }
       // empty slots stay fully blank, matching florr's loadout bar
       if (rowName === 'primary' && item) {
@@ -153,20 +176,63 @@ export class UI {
         slot.appendChild(pie);
       }
       slot.onclick = () => this.onSlotClick(rowName, i);
+      slot.ondragover = (e) => {
+        e.preventDefault(); // required for the element to accept a drop
+        slot.classList.add('dragover');
+      };
+      slot.ondragleave = () => slot.classList.remove('dragover');
+      slot.ondrop = (e) => {
+        e.preventDefault();
+        slot.classList.remove('dragover');
+        const key = e.dataTransfer.getData('text/plain');
+        if (key) this.equipInto(rowName, i, key);
+      };
       rowEl.appendChild(slot);
     });
   }
 
   onSlotClick(rowName, i) {
-    if (this.selected) {
-      // ask the server to equip the pending inventory petal into this slot
-      this.game.net.send({ t: 'equip', row: rowName, i, key: this.selected });
-      this.selected = null;
-      this.renderInventory();
+    if (this.selected) this.equipInto(rowName, i, this.selected);
+    // florr behavior: clicking a petal with nothing selected swaps it with
+    // its counterpart row
+    else this.game.net.send({ t: 'swapSlot', i });
+  }
+
+  // ask the server to equip an inventory petal (by key) into row/slot —
+  // shared by both click-to-select and drag-and-drop
+  equipInto(rowName, i, key) {
+    this.game.net.send({ t: 'equip', row: rowName, i, key });
+    this.selected = null;
+    this.renderInventory();
+  }
+
+  // ---- tooltip ----
+
+  showTooltip(target, type, rarityIdx) {
+    const def = PETAL_TYPES[type];
+    const rarity = RARITIES[rarityIdx];
+    this.tt.name.textContent = def.name;
+    this.tt.reload.textContent = `${def.reload}s ⟳`;
+    this.tt.rarity.textContent = rarity.name;
+    this.tt.rarity.style.color = rarity.color;
+    this.tt.desc.textContent = def.desc || '';
+    this.tt.health.textContent = `Health: ${Math.round(def.hp * rarity.statMult * 10) / 10}`;
+    this.tt.damage.textContent = `Damage: ${Math.round(def.dmg * rarity.dmgMult * 10) / 10}`;
+    if (def.heal) {
+      this.tt.heal.textContent = `Heal: ${Math.round(def.heal * rarity.statMult * 10) / 10}`;
+      this.tt.heal.style.display = '';
     } else {
-      // florr behavior: clicking a petal swaps it with its counterpart row
-      this.game.net.send({ t: 'swapSlot', i });
+      this.tt.heal.style.display = 'none';
     }
+
+    const rect = target.getBoundingClientRect();
+    this.el.tooltip.style.left = `${rect.left + rect.width / 2}px`;
+    this.el.tooltip.style.top = `${rect.top - 10}px`;
+    this.el.tooltip.classList.add('show');
+  }
+
+  hideTooltip() {
+    this.el.tooltip.classList.remove('show');
   }
 
   // ---- misc ----

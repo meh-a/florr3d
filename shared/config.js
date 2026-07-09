@@ -1,14 +1,14 @@
-// Rarity table. statMult for mob/petal stats is a flat x3 per tier. dmgMult
-// is a gentler curve used for mob contact damage so higher rarities are
-// dangerous but not guaranteed one-shots (though Mythic and Ultra get close).
+// Rarity table, matching the florr.io wiki's per-rarity multipliers.
+// statMult scales health (and heal/xp); dmgMult scales damage (flat x3 per
+// tier); armorMult scales armor. All are relative to Common = 1.
 export const RARITIES = [
-  { name: 'Common',    color: '#7eef6d', statMult: 1,   dmgMult: 1,    weight: 55,   scale: 1.0  },
-  { name: 'Unusual',   color: '#ffe65d', statMult: 3,   dmgMult: 1.8,  weight: 25,   scale: 1.3  },
-  { name: 'Rare',      color: '#4d52e3', statMult: 9,   dmgMult: 3.2,  weight: 12,   scale: 1.7  },
-  { name: 'Epic',      color: '#861fde', statMult: 27,  dmgMult: 5.6,  weight: 6,    scale: 2.2  },
-  { name: 'Legendary', color: '#de1f1f', statMult: 81,  dmgMult: 10,   weight: 2,    scale: 3.0  },
-  { name: 'Mythic',    color: '#1fdbde', statMult: 243, dmgMult: 17.5, weight: 0.4,  scale: 4.2  },
-  { name: 'Ultra',     color: '#ff2b75', statMult: 729, dmgMult: 30,   weight: 0.08, scale: 5.5  },
+  { name: 'Common',    color: '#7eef6d', statMult: 1,      dmgMult: 1,   armorMult: 1,   weight: 55,   scale: 1.0  },
+  { name: 'Unusual',   color: '#ffe65d', statMult: 3.75,   dmgMult: 3,   armorMult: 2,   weight: 25,   scale: 1.3  },
+  { name: 'Rare',      color: '#4d52e3', statMult: 13.5,   dmgMult: 9,   armorMult: 7,   weight: 12,   scale: 1.7  },
+  { name: 'Epic',      color: '#861fde', statMult: 54,     dmgMult: 27,  armorMult: 22,  weight: 6,    scale: 2.2  },
+  { name: 'Legendary', color: '#de1f1f', statMult: 324,    dmgMult: 81,  armorMult: 65,  weight: 2,    scale: 3.0  },
+  { name: 'Mythic',    color: '#1fdbde', statMult: 3159,   dmgMult: 243, armorMult: 194, weight: 0.4,  scale: 4.2  },
+  { name: 'Ultra',     color: '#ff2b75', statMult: 196830, dmgMult: 729, armorMult: 583, weight: 0.08, scale: 5.5  },
 ];
 
 // drops: [petalType|null, weight]
@@ -37,15 +37,22 @@ export const MOB_TYPES = {
 };
 
 export const PETAL_TYPES = {
-  basic:     { name: 'Basic',   hp: 10, dmg: 10, reload: 2.5, radius: 0.42, count: 1, color: '#ffffff' },
-  rockPetal: { name: 'Rock',    hp: 45, dmg: 10, reload: 8,   radius: 0.5,  count: 1, color: '#7d7d84' },
-  rose:      { name: 'Rose',    hp: 5,  dmg: 5,  reload: 3.5, radius: 0.42, count: 1, color: '#ff94c9', heal: 11 },
-  light:     { name: 'Light',   hp: 5,  dmg: 7,  reload: 0.6, radius: 0.28, count: 3, color: '#ffffff' },
-  stinger:   { name: 'Stinger', hp: 8,  dmg: 35, reload: 4,   radius: 0.35, count: 1, color: '#333333' },
-  orange:    { name: 'Orange',  hp: 6.6, dmg: 8, reload: 1,   radius: 0.3,  count: 3, color: '#eb9c2d' },
+  basic:     { name: 'Basic',   hp: 10, dmg: 10, reload: 2.5, radius: 0.42, count: 1, color: '#ffffff',
+               desc: 'A nice petal, not too strong but not too weak.' },
+  rockPetal: { name: 'Rock',    hp: 45, dmg: 10, reload: 8,   radius: 0.5,  count: 1, color: '#7d7d84',
+               desc: 'Heavy and durable, with a slow reload.' },
+  rose:      { name: 'Rose',    hp: 5,  dmg: 5,  reload: 3.5, radius: 0.42, count: 1, color: '#ff94c9', heal: 11,
+               desc: 'Flies home to heal you when you’re hurt.' },
+  light:     { name: 'Light',   hp: 5,  dmg: 7,  reload: 0.6, radius: 0.28, count: 3, color: '#ffffff',
+               desc: 'Fires in a rapid volley of three.' },
+  stinger:   { name: 'Stinger', hp: 8,  dmg: 35, reload: 4,   radius: 0.35, count: 1, color: '#333333',
+               desc: 'Fragile, but deals heavy damage.' },
+  orange:    { name: 'Orange',  hp: 6.6, dmg: 8, reload: 1,   radius: 0.3,  count: 3, color: '#eb9c2d',
+               desc: 'A weaker but faster version of Light.' },
   // fired as a straight-line projectile while attacking, florr's legacy petal
   missile:   { name: 'Missile', hp: 2,  dmg: 35, reload: 3,   radius: 0.4,  count: 1, color: '#333333',
-               projectile: { speed: 24, life: 1.8 } },
+               projectile: { speed: 24, life: 1.8 },
+               desc: 'Launches forward as a projectile when attacking.' },
 };
 
 export const ARENA_HALF = 145;       // playable half-extent; ground drawn a bit larger

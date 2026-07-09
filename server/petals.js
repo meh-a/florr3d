@@ -56,12 +56,12 @@ export class PetalManager {
 
   swapSlot(i) {
     [this.primary[i], this.secondary[i]] = [this.secondary[i], this.primary[i]];
-    this.rebuildAll();
+    this.replaceSlot(i);
   }
 
   swapRows() {
     [this.primary, this.secondary] = [this.secondary, this.primary];
-    this.rebuildAll();
+    for (let i = 0; i < SLOTS; i++) this.replaceSlot(i);
   }
 
   // place item into row/slot, returning whatever was there
@@ -69,14 +69,45 @@ export class PetalManager {
     const slots = row === 'primary' ? this.primary : this.secondary;
     const old = slots[i];
     slots[i] = item;
-    if (row === 'primary') this.rebuildAll();
+    if (row === 'primary') this.replaceSlot(i);
     return old;
   }
 
-  rebuildAll() {
-    this.instances = [];
+  makeInstances(slot, slotIdx, total, startPosIdx, readyNow) {
+    const def = PETAL_TYPES[slot.type];
+    const rarity = RARITIES[slot.rarity];
+    const mult = rarity.statMult;
+    const size = def.radius * (1 + slot.rarity * 0.12);
+    const out = [];
+    for (let j = 0; j < def.count; j++) {
+      out.push({
+        id: uid(),
+        slotIdx,
+        type: slot.type,
+        rarity: slot.rarity,
+        angleFrac: (startPosIdx + j) / total,
+        radius: size,
+        maxHp: def.hp * mult,
+        hp: def.hp * mult,
+        dmg: def.dmg * rarity.dmgMult,
+        heal: (def.heal || 0) * mult,
+        reload: def.reload,
+        // a freshly-built loadout (construction) is ready immediately; a
+        // slot that just got swapped/equipped into has to reload in, same
+        // as a destroyed petal recharging — see replaceSlot
+        alive: readyNow,
+        cooldown: readyNow ? 0 : def.reload,
+        pos: this.player.pos.clone(),
+      });
+    }
+    return out;
+  }
 
-    // count total orbit positions so all instances spread evenly, like florr
+  rebuildAll() {
+    // full (re)build, every slot ready immediately — used only at
+    // construction; swaps/equips go through replaceSlot instead so they
+    // don't disturb petals in slots that weren't touched
+    this.instances = [];
     const counts = this.primary.map((s) => (s ? PETAL_TYPES[s.type].count : 0));
     const total = counts.reduce((a, b) => a + b, 0);
     if (total === 0) return;
@@ -84,29 +115,49 @@ export class PetalManager {
     let posIdx = 0;
     this.primary.forEach((slot, slotIdx) => {
       if (!slot) return;
-      const def = PETAL_TYPES[slot.type];
-      const mult = RARITIES[slot.rarity].statMult;
-      const size = def.radius * (1 + slot.rarity * 0.12);
-      for (let j = 0; j < def.count; j++) {
-        this.instances.push({
-          id: uid(),
-          slotIdx,
-          type: slot.type,
-          rarity: slot.rarity,
-          angleFrac: posIdx / total,
-          radius: size,
-          maxHp: def.hp * mult,
-          hp: def.hp * mult,
-          dmg: def.dmg * mult,
-          heal: (def.heal || 0) * mult,
-          reload: def.reload,
-          alive: true,
-          cooldown: 0,
-          pos: this.player.pos.clone(),
-        });
-        posIdx++;
-      }
+      this.instances.push(...this.makeInstances(slot, slotIdx, total, posIdx, true));
+      posIdx += PETAL_TYPES[slot.type].count;
     });
+  }
+
+  // Replace whichever petal is active in one hotbar slot: the old instance
+  // is discarded and the new one has to reload in (alive:false), rather
+  // than swapping instantly — same "destroyed and recharging" language the
+  // client already renders for petals lost in combat. Other slots' existing
+  // instances keep their id/hp/cooldown (only angleFrac is refreshed, since
+  // the total orbit position count can change if the new petal has a
+  // different `count`), so they aren't disturbed by an unrelated swap.
+  replaceSlot(slotIdx) {
+    const counts = this.primary.map((s) => (s ? PETAL_TYPES[s.type].count : 0));
+    const total = counts.reduce((a, b) => a + b, 0);
+    if (total === 0) {
+      this.instances = [];
+      return;
+    }
+
+    const bySlot = new Map();
+    for (const inst of this.instances) {
+      if (!bySlot.has(inst.slotIdx)) bySlot.set(inst.slotIdx, []);
+      bySlot.get(inst.slotIdx).push(inst);
+    }
+
+    const rebuilt = [];
+    let posIdx = 0;
+    this.primary.forEach((slot, i) => {
+      if (!slot) return;
+      if (i === slotIdx) {
+        rebuilt.push(...this.makeInstances(slot, i, total, posIdx, false));
+      } else {
+        const existing = bySlot.get(i) || [];
+        for (let j = 0; j < counts[i]; j++) {
+          const inst = existing[j];
+          inst.angleFrac = (posIdx + j) / total;
+          rebuilt.push(inst);
+        }
+      }
+      posIdx += counts[i];
+    });
+    this.instances = rebuilt;
   }
 
   destroyInstance(inst) {

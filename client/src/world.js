@@ -124,6 +124,206 @@ function makeCloudField(scene) {
   };
 }
 
+// Toggle for the sky implementation. A sphere's equirectangular UV mapping
+// has a real mathematical singularity at the zenith — every azimuth's ray
+// direction converges toward the same "straight up" sample, so if the noise
+// happens to be thin exactly there, the whole overhead cap bakes as one
+// permanent gap (see makeVolumetricClouds below). A cube has no such pole:
+// every face is sampled with plain flat-plane directions, so the same bake
+// shader can't produce that failure mode by construction, not by patching.
+// Flip to false to fall back to the dome.
+const CUBE_SKY = true;
+
+// One shared raymarch bake shader (identical cloud math either way) fed a
+// per-face direction basis instead of spherical elev/azim. Faces are built
+// so the geometry's own UV <-> world-position mapping and the shader's UV
+// <-> ray-direction mapping are derived from the exact same (normal, right,
+// up) triple — that guarantees adjoining faces sample the same direction at
+// a shared edge (since it's determined by the actual 3D position, not by
+// which face "owns" it), so seams line up without any special-casing.
+const CUBE_HALF = 250; // half-extent; corners (~433) stay inside camera.far (500)
+const CUBE_FACES = [
+  // top: never below the horizon fade, so no horizon-cutoff edge case.
+  // up is [0,0,-1] rather than the "obvious" [0,0,1] so that right×up
+  // matches +normal like the other four faces do — with [0,0,1] the
+  // triangle winding comes out flipped relative to the sides, and since
+  // the material culls by side: BackSide, a flipped winding culls the
+  // wrong face and the whole top panel renders as nothing.
+  { normal: [0, 1, 0], right: [1, 0, 0], up: [0, 0, -1] },
+  { normal: [1, 0, 0], right: [0, 0, -1], up: [0, 1, 0] },
+  { normal: [-1, 0, 0], right: [0, 0, 1], up: [0, 1, 0] },
+  { normal: [0, 0, 1], right: [1, 0, 0], up: [0, 1, 0] },
+  { normal: [0, 0, -1], right: [-1, 0, 0], up: [0, 1, 0] },
+];
+
+function makeFaceGeometry(normal, right, up, size) {
+  const n = normal.clone().multiplyScalar(size);
+  const r = right.clone().multiplyScalar(size);
+  const u = up.clone().multiplyScalar(size);
+  const corners = [
+    n.clone().sub(r).sub(u), n.clone().add(r).sub(u),
+    n.clone().add(r).add(u), n.clone().sub(r).add(u),
+  ];
+  const positions = new Float32Array(corners.flatMap((v) => [v.x, v.y, v.z]));
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
+  geo.setIndex([0, 1, 2, 0, 2, 3]);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// GLSL shared by both the dome and cube bakes: hash/noise/fbm/density are
+// identical either way, so the cube isn't a different-looking sky, just a
+// different (pole-free) way of sampling the same cloud field.
+const CLOUD_GLSL = /* glsl */ `
+  precision highp float;
+  varying vec2 vUv;
+  uniform vec3 uSunDir;
+
+  const float CLOUD_BOTTOM = 60.0;
+  const float CLOUD_TOP = 145.0;
+  const int STEPS = 64;
+  const int LIGHT_STEPS = 5;
+
+  float hash(vec3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+  float noise(vec3 x) {
+    vec3 i = floor(x), f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x),
+          mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+      mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+          mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y),
+      f.z);
+  }
+  float fbm(vec3 p) {
+    float amp = 0.5, res = 0.0;
+    for (int i = 0; i < 5; i++) {
+      res += amp * noise(p);
+      p *= 2.13;
+      amp *= 0.5;
+    }
+    return res;
+  }
+
+  float density(vec3 p) {
+    float shape = fbm(p * 0.0075);
+    // wispy eroded edges from higher-frequency detail noise
+    shape -= 0.16 * fbm(p * 0.03);
+    float h = (p.y - CLOUD_BOTTOM) / (CLOUD_TOP - CLOUD_BOTTOM);
+    float grad = smoothstep(0.0, 0.2, h) * smoothstep(1.0, 0.5, h);
+    return clamp((shape * grad - 0.27) * 2.6, 0.0, 1.0);
+  }
+
+  float lightMarch(vec3 p) {
+    float d = 0.0;
+    for (int i = 0; i < LIGHT_STEPS; i++) {
+      p += uSunDir * 14.0;
+      d += density(p);
+    }
+    return exp(-d * 1.1);
+  }
+
+  vec4 march(vec3 rd) {
+    float horizon = smoothstep(0.02, 0.1, rd.y);
+    if (horizon <= 0.0) return vec4(0.0);
+
+    vec3 ro = vec3(0.0, 15.0, 0.0); // nominal viewer; parallax is negligible
+    float t0 = (CLOUD_BOTTOM - ro.y) / rd.y;
+    float t1 = (CLOUD_TOP - ro.y) / rd.y;
+    t1 = min(t1, t0 + 900.0); // cap shallow rays skimming the slab
+    float stepLen = (t1 - t0) / float(STEPS);
+
+    vec3 col = vec3(0.0);
+    float acc = 0.0;
+    for (int i = 0; i < STEPS; i++) {
+      vec3 p = ro + rd * (t0 + (float(i) + 0.5) * stepLen);
+      float den = density(p);
+      if (den < 0.002) continue;
+      float lit = lightMarch(p);
+      // shadowed cores go blue-grey, sunlit faces stay warm white
+      vec3 c = mix(vec3(0.53, 0.58, 0.70), vec3(1.03, 1.0, 0.96), lit);
+      float a = 1.0 - exp(-den * stepLen * 0.075);
+      col += c * a * (1.0 - acc);
+      acc += a * (1.0 - acc);
+      if (acc > 0.99) break;
+    }
+    return vec4(col, acc * horizon);
+  }
+`;
+
+function bakeFace(renderer, material, uniforms, resolution) {
+  const target = new THREE.WebGLRenderTarget(resolution, resolution, { depthBuffer: false });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+  const bakeScene = new THREE.Scene();
+  bakeScene.add(quad);
+  const bakeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  material.uniforms.uNormal.value.set(...uniforms.normal);
+  material.uniforms.uRight.value.set(...uniforms.right);
+  material.uniforms.uUp.value.set(...uniforms.up);
+  renderer.setRenderTarget(target);
+  renderer.render(bakeScene, bakeCamera);
+  renderer.setRenderTarget(null);
+  quad.geometry.dispose();
+  return target;
+}
+
+function makeCubeClouds(scene, renderer, sunDir) {
+  const bakeMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uSunDir: { value: sunDir.clone().normalize() },
+      uNormal: { value: new THREE.Vector3() },
+      uRight: { value: new THREE.Vector3() },
+      uUp: { value: new THREE.Vector3() },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: CLOUD_GLSL + /* glsl */ `
+      uniform vec3 uNormal, uRight, uUp;
+      void main() {
+        vec2 pxpy = vUv * 2.0 - 1.0;
+        vec3 rd = normalize(uNormal + uRight * pxpy.x + uUp * pxpy.y);
+        gl_FragColor = march(rd);
+      }
+    `,
+  });
+
+  const box = new THREE.Group();
+  for (const f of CUBE_FACES) {
+    const normal = new THREE.Vector3(...f.normal);
+    const right = new THREE.Vector3(...f.right);
+    const up = new THREE.Vector3(...f.up);
+    const target = bakeFace(renderer, bakeMaterial, f, 512);
+    const mesh = new THREE.Mesh(
+      makeFaceGeometry(normal, right, up, CUBE_HALF),
+      new THREE.MeshBasicMaterial({
+        map: target.texture, transparent: true, depthWrite: false,
+        side: THREE.BackSide, fog: false,
+      })
+    );
+    box.add(mesh);
+  }
+  bakeMaterial.dispose();
+  scene.add(box);
+
+  // recentered on the player every frame so the (very distant) edges never
+  // enter view, plus a slow spin for a hint of wind
+  return (dt, focus) => {
+    box.rotation.y += dt * 0.004;
+    box.position.set(focus?.x ?? 0, 0, focus?.z ?? 0);
+  };
+}
+
 // Raymarched volumetric clouds, baked: the expensive shadertoy-style
 // raymarch (fbm noise slab, front-to-back accumulation, sun-shadow samples
 // per step) runs exactly once at startup, rendered into an equirect texture
@@ -400,7 +600,7 @@ export function createWorld(container) {
   });
 
   const updateClouds = highQ
-    ? makeVolumetricClouds(scene, renderer, sunOffset)
+    ? (CUBE_SKY ? makeCubeClouds(scene, renderer, sunOffset) : makeVolumetricClouds(scene, renderer, sunOffset))
     : makeCloudField(scene);
   const updateTiles = makeTiles(scene, quality, sunOffset);
   const updateGrass = ultra ? makeGrass(scene, sunOffset) : null;
@@ -411,7 +611,7 @@ export function createWorld(container) {
   const FPS_FOV = 75;
   // look = { yaw, pitch } for first-person mode, or null for the top-down chase cam
   function updateCamera(dt, focus, look = null) {
-    updateClouds(dt);
+    updateClouds(dt, focus);
     updateTiles(dt);
     if (updateGrass) updateGrass(dt, focus);
     sun.position.set(focus.x + sunOffset.x, sunOffset.y, focus.z + sunOffset.z);
