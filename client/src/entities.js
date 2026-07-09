@@ -133,7 +133,7 @@ export class EntitySync {
       type: m.type, mesh, hpBar, blob,
       target: new THREE.Vector3(m.x, m.y || 0, m.z), facing: m.facing,
       pitch: m.pitch || 0, loaded: m.loaded !== false, wingAge: Math.random() * 10,
-      hp: m.hp, maxHp: m.maxHp, displayHp: m.hp,
+      hp: m.hp, maxHp: m.maxHp, displayHp: m.hp, greenHp: m.hp,
       barOffsetY: radius * 2.1 + 0.35,
     };
   }
@@ -245,8 +245,11 @@ export class EntitySync {
         }
       }
 
+      // green tracks the real hp quickly; the red ghost trails behind slowly,
+      // so damage reads as a green dip followed by a red wipe
+      v.greenHp += (v.hp - v.greenHp) * damp(12, dt);
       v.displayHp += (v.hp - v.displayHp) * damp(3, dt);
-      v.hpBar.draw(v.hp / v.maxHp, v.displayHp / v.maxHp);
+      v.hpBar.draw(v.greenHp / v.maxHp, v.displayHp / v.maxHp);
       v.hpBar.mesh.position.set(
         v.mesh.position.x, v.mesh.position.y + v.barOffsetY, v.mesh.position.z
       );

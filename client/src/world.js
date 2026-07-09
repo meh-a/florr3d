@@ -302,10 +302,17 @@ export function createWorld(container) {
   sun.target = sunTarget;
   scene.add(sun);
 
-  // visible sun + lens flare, placed far along the light direction
+  // visible sun + lens flare, placed far along the light direction. Kept at
+  // a constant bearing from the player (like sun.position/sunTarget below)
+  // rather than a fixed world position — the volumetric cloud dome is baked
+  // assuming a viewer near the origin, so a flare that doesn't travel with
+  // the player drifts off that bearing and ends up staring through a gap in
+  // the baked cloud texture as soon as the player wanders from map center.
+  const sunDir = sunOffset.clone().normalize();
+  let sunAnchor = null;
   if (highQ) {
-    const sunAnchor = new THREE.Object3D();
-    sunAnchor.position.copy(sun.position).normalize().multiplyScalar(380);
+    sunAnchor = new THREE.Object3D();
+    sunAnchor.position.copy(sunDir).multiplyScalar(380);
     const flare = new Lensflare();
     flare.addElement(new LensflareElement(makeFlareTexture('sun'), 420, 0));
     flare.addElement(new LensflareElement(makeFlareTexture('ghost'), 70, 0.35));
@@ -409,6 +416,7 @@ export function createWorld(container) {
     if (updateGrass) updateGrass(dt, focus);
     sun.position.set(focus.x + sunOffset.x, sunOffset.y, focus.z + sunOffset.z);
     sunTarget.position.set(focus.x, 0, focus.z);
+    if (sunAnchor) sunAnchor.position.set(focus.x, 0, focus.z).addScaledVector(sunDir, 380);
 
     const fov = look ? FPS_FOV : TOPDOWN_FOV;
     if (camera.fov !== fov) {
