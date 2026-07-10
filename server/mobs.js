@@ -24,8 +24,8 @@ const HORNET = {
 };
 
 class Mob {
-  constructor(game, type, rarityIdx, pos) {
-    this.game = game;
+  constructor(world, type, rarityIdx, pos) {
+    this.world = world;
     this.id = uid();
     this.type = type;
     this.def = MOB_TYPES[type];
@@ -48,6 +48,7 @@ class Mob {
     this.knock = new THREE.Vector3();
     this.hitCooldowns = new Map();
     this.deadFlag = false;
+    this.lastAttacker = null; // Player credited with the kill for xp
 
     if (this.type === 'hornet') {
       this.pos.y = HORNET.cruiseAlt + this.radius; // spawns already airborne
@@ -58,11 +59,12 @@ class Mob {
     }
   }
 
-  damage(amount, source = null) {
+  damage(amount, source = null, attacker = null) {
     const dealt = Math.max(1, amount - this.armor);
     this.hp -= dealt;
-    this.game.events.push({ e: 'flash', id: this.id });
-    this.game.events.push({
+    if (attacker) this.lastAttacker = attacker;
+    this.world.events.push({ e: 'flash', k: 'mob', id: this.id });
+    this.world.events.push({
       e: 'dmg', a: Math.round(dealt),
       x: Math.round(this.pos.x * 100) / 100, z: Math.round(this.pos.z * 100) / 100,
     });
@@ -78,9 +80,12 @@ class Mob {
   die() {
     if (this.deadFlag) return;
     this.deadFlag = true;
-    this.game.player.gainXp(this.xp);
+    // credit the last player who damaged this mob (if they're still here)
+    const killer = this.lastAttacker && this.world.players.has(this.lastAttacker.id)
+      ? this.lastAttacker : this.world.nearestPlayer(this.pos);
+    if (killer) killer.gainXp(this.xp);
     const dropType = pickDrop(this.type);
-    if (dropType) this.game.drops.spawn(dropType, this.rarity, this.pos);
+    if (dropType) this.world.drops.spawn(dropType, this.rarity, this.pos);
   }
 
   update(dt) {
@@ -93,11 +98,11 @@ class Mob {
   }
 
   updateGround(dt) {
-    const player = this.game.player;
+    const player = this.world.nearestPlayer(this.pos);
     let vel = new THREE.Vector3();
 
     if (this.speed > 0) {
-      if (this.aggro && !player.dead) {
+      if (this.aggro && player) {
         const toPlayer = player.pos.clone().sub(this.pos).setY(0);
         if (toPlayer.lengthSq() > 0.01) toPlayer.normalize();
         if (this.type === 'bee') {
@@ -134,13 +139,13 @@ class Mob {
   // standoff ring, flip 180°, lob missiles) -> swoop (dive through the
   // player at petal height — the punish window) -> back to volley/cruise.
   updateHornet(dt) {
-    const player = this.game.player;
+    const player = this.world.nearestPlayer(this.pos); // null if nobody alive
     const f = this.flight;
-    const toPlayer = player.pos.clone().sub(this.pos).setY(0);
-    const hDist = toPlayer.length();
-    if (hDist > 0.01) toPlayer.multiplyScalar(1 / hDist);
+    const toPlayer = player ? player.pos.clone().sub(this.pos).setY(0) : new THREE.Vector3();
+    const hDist = player ? toPlayer.length() : Infinity;
+    if (player && hDist > 0.01) toPlayer.multiplyScalar(1 / hDist);
 
-    if (player.dead) {
+    if (!player) {
       this.aggro = false;
       f.state = 'cruise';
     } else if (hDist < HORNET.aggroRange) {
@@ -186,7 +191,7 @@ class Mob {
       if (f.regrow <= 0) this.loaded = true;
       f.fireTimer -= dt;
       if (f.fireTimer <= 0 && this.loaded && inRing && hDist < HORNET.fireRange) {
-        this.game.mobs.fireMissile(this);
+        this.world.mobs.fireMissile(this, player);
         this.loaded = false;
         f.regrow = HORNET.regrowTime;
         f.fireTimer = HORNET.fireInterval;
@@ -225,8 +230,8 @@ class Mob {
 }
 
 export class MobManager {
-  constructor(game) {
-    this.game = game;
+  constructor(world) {
+    this.world = world;
     this.mobs = [];
     this.missiles = [];
     this.spawnTimer = 0;
@@ -252,25 +257,28 @@ export class MobManager {
 
   trySpawn(initial = false) {
     if (this.mobs.length >= MOB_CAP) return;
-    const player = this.game.player;
+    const players = [...this.world.players.values()];
     for (let attempt = 0; attempt < 12; attempt++) {
       const pos = new THREE.Vector3(
         (Math.random() * 2 - 1) * (ARENA_HALF - 8), 0,
         (Math.random() * 2 - 1) * (ARENA_HALF - 8)
       );
-      const dist = pos.distanceTo(player.pos);
-      if (dist < 30 || (!initial && dist > 130)) continue;
-      this.mobs.push(new Mob(this.game, this.pickType(), pickRarity(), pos));
+      // never pop in on top of anyone; after the initial fill, also stay
+      // within roaming range of at least one player (any spot is fine
+      // while the world is empty)
+      const dists = players.map((p) => pos.distanceTo(p.pos));
+      if (dists.some((d) => d < 30)) continue;
+      if (!initial && dists.length > 0 && !dists.some((d) => d <= 130)) continue;
+      this.mobs.push(new Mob(this.world, this.pickType(), pickRarity(), pos));
       return;
     }
   }
 
-  // launch the hornet's tail missile at the player's current position;
-  // it flies a straight line, so the lob is dodgeable by moving
-  fireMissile(hornet) {
+  // launch the hornet's tail missile at its target player's current
+  // position; it flies a straight line, so the lob is dodgeable by moving
+  fireMissile(hornet, player) {
     const r = RARITIES[hornet.rarity];
     const mdef = hornet.def.missile;
-    const player = this.game.player;
     const target = new THREE.Vector3(player.pos.x, 1.1, player.pos.z);
     const aim = target.clone().sub(hornet.pos).setY(0).normalize();
     const origin = hornet.pos.clone().addScaledVector(aim, hornet.radius * 1.2);

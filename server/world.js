@@ -1,0 +1,170 @@
+import { PETAL_TYPES, RARITIES } from '../shared/config.js';
+import { Player } from './player.js';
+import { MobManager } from './mobs.js';
+import { DropManager } from './drops.js';
+import { updateCombat } from './combat.js';
+
+const r2 = (v) => Math.round(v * 100) / 100;
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+const SLOTS = 5;
+
+// One authoritative shared world per server process. Every websocket
+// connection is a Player inside this world — they all see the same mobs,
+// drops, and each other. The client only ever sends intents — movement
+// input and loadout requests — and everything with gameplay consequences
+// (damage, xp, drops, inventory) is decided here.
+export class World {
+  constructor() {
+    this.time = 0;
+    // world-visible one-shot events (flash, dmg) sent to every recipient;
+    // per-player toasts live on each Player instead. Flushed once per tick
+    // after snapshots are built, not per recipient.
+    this.events = [];
+    this.players = new Map(); // id -> Player
+    this.mobs = new MobManager(this);
+    this.drops = new DropManager(this);
+  }
+
+  addPlayer() {
+    const player = new Player(this);
+    this.players.set(player.id, player);
+    return player;
+  }
+
+  removePlayer(id) {
+    this.players.delete(id);
+  }
+
+  // nearest living player to a position, or null if nobody qualifies
+  nearestPlayer(pos) {
+    let best = null;
+    let bestD = Infinity;
+    for (const p of this.players.values()) {
+      if (p.dead) continue;
+      const d = p.pos.distanceTo(pos);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return best;
+  }
+
+  handle(playerId, msg) {
+    const player = this.players.get(playerId);
+    if (!player || !msg || typeof msg !== 'object') return;
+    switch (msg.t) {
+      case 'join': {
+        // display name, sent once by the client; re-sent on reconnect
+        if (typeof msg.name !== 'string') return;
+        const name = msg.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16);
+        player.name = name || 'Flower';
+        break;
+      }
+      case 'input': {
+        const i = player.input;
+        i.tx = num(msg.tx);
+        i.tz = num(msg.tz);
+        i.ax = Math.max(-1, Math.min(1, num(msg.ax)));
+        i.az = Math.max(-1, Math.min(1, num(msg.az)));
+        i.fps = !!msg.fps;
+        i.yaw = num(msg.yaw);
+        i.atk = !!msg.atk;
+        i.def = !!msg.def;
+        break;
+      }
+      case 'swapSlot': {
+        const i = msg.i;
+        if (Number.isInteger(i) && i >= 0 && i < SLOTS) player.petals.swapSlot(i);
+        break;
+      }
+      case 'swapRows':
+        player.petals.swapRows();
+        break;
+      case 'rotSpeed':
+        player.petals.changeRotSpeed(Math.max(-1, Math.min(1, num(msg.delta))));
+        break;
+      case 'equip': {
+        const { row, i, key } = msg;
+        if ((row !== 'primary' && row !== 'secondary') || !Number.isInteger(i) || i < 0 || i >= SLOTS) return;
+        if (typeof key !== 'string') return;
+        const item = player.takeFromInventory(key);
+        if (!item || !PETAL_TYPES[item.type] || !RARITIES[item.rarity]) return;
+        const old = player.petals.equip(row, i, item);
+        if (old) player.addToInventory(old.type, old.rarity, true);
+        break;
+      }
+    }
+  }
+
+  tick(dt) {
+    this.time += dt;
+    for (const player of this.players.values()) {
+      player.update(dt);
+      player.petals.update(dt);
+    }
+    this.mobs.update(dt);
+    this.drops.update(dt);
+    updateCombat(this, dt);
+  }
+
+  // Build one snapshot per player. The public payload (players, mobs,
+  // drops, missiles, shared events) is computed once; each recipient gets
+  // it plus a private slice — their own inventory, xp, and toasts — which
+  // must never be sent to anyone else. Flushes all one-shot events.
+  buildSnapshots() {
+    const shared = {
+      t: 'state',
+      time: r2(this.time),
+      players: [...this.players.values()].map((p) => ({
+        id: p.id, name: p.name,
+        x: r2(p.pos.x), z: r2(p.pos.z), facing: r2(p.facing),
+        hp: r2(p.hp), maxHp: p.maxHp, level: p.level,
+        dead: p.dead, deadTimer: r2(p.deadTimer),
+        petals: {
+          rotFactor: p.petals.rotFactor,
+          primary: p.petals.primary,
+          secondary: p.petals.secondary,
+          instances: p.petals.instances.map((inst) => ({
+            id: inst.id, slot: inst.slotIdx, type: inst.type, rarity: inst.rarity,
+            alive: inst.alive, x: r2(inst.pos.x), z: r2(inst.pos.z),
+            // reload fraction remaining (0 = ready), drives the UI pie sweep
+            cd: inst.alive ? 0 : r2(Math.min(1, Math.max(0, inst.cooldown / inst.reload))),
+          })),
+        },
+      })),
+      mobs: this.mobs.mobs.map((m) => ({
+        id: m.id, type: m.type, rarity: m.rarity,
+        x: r2(m.pos.x), z: r2(m.pos.z), facing: r2(m.facing),
+        hp: r2(m.hp), maxHp: r2(m.maxHp),
+        // flight fields only exist for airborne mobs (hornet)
+        ...(m.flight ? { y: r2(m.pos.y), pitch: r2(m.pitch), loaded: m.loaded } : {}),
+      })),
+      missiles: this.mobs.missiles.map((mi) => ({
+        id: mi.id, rarity: mi.rarity,
+        x: r2(mi.pos.x), y: r2(mi.pos.y), z: r2(mi.pos.z),
+        yaw: r2(mi.yaw), pitch: r2(mi.pitch),
+      })),
+      pmissiles: [...this.players.values()].flatMap((p) =>
+        p.petals.projectiles.map((proj) => ({
+          id: proj.id, type: proj.type, rarity: proj.rarity,
+          x: r2(proj.pos.x), z: r2(proj.pos.z), yaw: r2(proj.yaw),
+        }))),
+      drops: this.drops.drops.map((d) => ({
+        id: d.id, type: d.type, rarity: d.rarity, x: r2(d.pos.x), z: r2(d.pos.z),
+      })),
+    };
+
+    const out = new Map(); // playerId -> snapshot
+    for (const p of this.players.values()) {
+      out.set(p.id, {
+        ...shared,
+        you: p.id,
+        xp: Math.floor(p.xp),
+        xpNext: p.xpForNext(),
+        inventory: [...p.inventory.entries()],
+        events: [...this.events, ...p.events],
+      });
+    }
+    this.events = [];
+    for (const p of this.players.values()) p.events = [];
+    return out;
+  }
+}

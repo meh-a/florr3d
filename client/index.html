@@ -113,6 +113,22 @@
     #death .big { font-size: 44px; }
     #death .small { font-size: 18px; }
 
+    /* name gate: shown once on load, before the flower gets a name */
+    #namegate { position: absolute; inset: 0; background: rgba(0,0,0,0.45); display: flex;
+                align-items: center; justify-content: center; flex-direction: column; gap: 14px; }
+    #namegate.hidden { display: none; }
+    #namegate .gametitle { font-size: 52px; }
+    #namegate .namerow { display: flex; gap: 8px; }
+    #nameinput { font-family: inherit; font-weight: 700; font-size: 18px; padding: 10px 16px;
+                 border: 4px solid rgba(0,0,0,0.25); border-radius: 999px; outline: none;
+                 background: #fff; color: #222; width: 240px; text-align: center; }
+    #playbtn { font-family: inherit; font-weight: 700; font-size: 18px; color: #fff;
+               background: linear-gradient(180deg, #8bee52, #63cd28); cursor: pointer;
+               border: 4px solid rgba(0,0,0,0.25); border-radius: 999px; padding: 10px 26px;
+               transition: transform 0.08s; }
+    #playbtn:hover { transform: scale(1.06); }
+    #playbtn:active { transform: scale(0.97); }
+
     /* toasts */
     #toasts { position: absolute; top: 90px; left: 50%; transform: translateX(-50%);
               display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; }
@@ -163,6 +179,13 @@
       </div>
     </div>
     <div id="toasts"></div>
+    <div id="namegate">
+      <div class="gametitle stroke">florr3d</div>
+      <div class="namerow">
+        <input id="nameinput" maxlength="16" placeholder="Flower" autocomplete="off" />
+        <button id="playbtn">Play</button>
+      </div>
+    </div>
     <div id="death">
       <div class="big stroke">You died</div>
       <div class="small stroke" id="deathtimer">Respawning…</div>

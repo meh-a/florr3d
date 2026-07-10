@@ -1,11 +1,13 @@
-// Web Worker entry: the same authoritative Game the websocket server runs,
+// Web Worker entry: the same authoritative World the websocket server runs,
 // hosted in-browser for static deploys (GitHub Pages) where there is no
 // server to connect to. The sim code is identical — only the transport
-// differs (postMessage instead of a websocket).
-import { Game } from './game.js';
+// differs (postMessage instead of a websocket). Fundamentally solo: the
+// world has exactly one player, this tab's.
+import { World } from './world.js';
 
 const TICK_MS = 1000 / 30;
-const game = new Game();
+const world = new World();
+const player = world.addPlayer();
 let last = performance.now();
 
 setInterval(() => {
@@ -14,10 +16,10 @@ setInterval(() => {
   // huge physics step
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
-  game.tick(dt);
-  postMessage(game.snapshot());
+  world.tick(dt);
+  postMessage(world.buildSnapshots().get(player.id));
 }, TICK_MS);
 
 onmessage = (ev) => {
-  try { game.handle(ev.data); } catch (err) { console.error('bad message', err); }
+  try { world.handle(player.id, ev.data); } catch (err) { console.error('bad message', err); }
 };

@@ -12,9 +12,9 @@ const ORBIT_DEFEND = 1.7;
 // petals (light) create several instances for one slot. Positions are
 // simulated here so petal-vs-mob combat can't be spoofed by the client.
 export class PetalManager {
-  constructor(game) {
-    this.game = game;
-    this.player = game.player;
+  constructor(world, player) {
+    this.world = world;
+    this.player = player;
     this.primary = Array.from({ length: SLOTS }, () => ({ type: 'basic', rarity: 0 }));
     this.secondary = Array.from({ length: SLOTS }, () => null);
     this.instances = [];
@@ -51,7 +51,7 @@ export class PetalManager {
 
   changeRotSpeed(delta) {
     this.rotFactor = Math.max(0.3, Math.min(1, this.rotFactor + delta));
-    this.game.toast(`Rotation ${Math.round(this.rotFactor * 100)}%`);
+    this.player.toast(`Rotation ${Math.round(this.rotFactor * 100)}%`);
   }
 
   swapSlot(i) {
@@ -166,7 +166,7 @@ export class PetalManager {
   }
 
   update(dt) {
-    const input = this.game.input;
+    const input = this.player.input;
     const targetR = input.atk ? ORBIT_ATTACK : input.def ? ORBIT_DEFEND : ORBIT_NEUTRAL;
     this.radius += (targetR - this.radius) * damp(8, dt);
     this.rot += BASE_ROT_SPEED * this.rotFactor * dt;

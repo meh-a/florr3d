@@ -27,15 +27,45 @@ Promise.all([
   game.entities = new EntitySync(game);
   game.net = new Net({
     onState: (state) => {
+      // the shared world sends all players; pick out our own entry and
+      // present it as `player`/`petals` for the view/UI layers (xp is
+      // private and arrives top-level, only for us)
+      const me = state.players.find((p) => p.id === state.you);
+      if (!me) return; // we're not in the world (yet)
+      state.player = { ...me, xp: state.xp, xpNext: state.xpNext };
+      state.petals = me.petals;
       game.entities.apply(state);
       game.ui.applyState(state);
     },
-    onStatus: (mode) => game.ui.toast({
-      online: 'Connected',
-      offline: 'Connection lost — retrying…',
-      local: 'No server found — running locally',
-    }[mode]),
+    onStatus: (mode) => {
+      // a (re)connect is a brand-new server-side player, so the name has
+      // to be (re)introduced every time the transport comes up
+      if ((mode === 'online' || mode === 'local') && chosenName) {
+        game.net.send({ t: 'join', name: chosenName });
+      }
+      game.ui.toast({
+        online: 'Connected',
+        offline: 'Connection lost — retrying…',
+        local: 'No server found — running locally',
+      }[mode]);
+    },
   });
+
+  // name gate: pick a display name once, remember it for next visit
+  const gate = document.getElementById('namegate');
+  const nameInput = document.getElementById('nameinput');
+  let chosenName = null;
+  nameInput.value = localStorage.getItem('playerName') || '';
+  nameInput.focus();
+  const submitName = () => {
+    chosenName = nameInput.value.trim().slice(0, 16) || 'Flower';
+    localStorage.setItem('playerName', chosenName);
+    game.net.send({ t: 'join', name: chosenName });
+    gate.classList.add('hidden');
+    nameInput.blur();
+  };
+  document.getElementById('playbtn').addEventListener('click', submitName);
+  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitName(); });
 
   // hotkeys — the view toggle is local, everything else is a server intent
   game.input.on('f', () => {

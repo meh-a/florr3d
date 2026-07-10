@@ -1,13 +1,21 @@
 import * as THREE from 'three';
-import { clampToArena } from '../shared/config.js';
+import { PETAL_TYPES, RARITIES, clampToArena } from '../shared/config.js';
+import { uid } from './utils.js';
+import { PetalManager } from './petals.js';
 
 // Authoritative player. Movement is driven by the last input the client
 // sent (cursor target in top-down mode, yaw + move axes in first person);
-// hp/xp/death are decided here and only reported to the client.
+// hp/xp/death are decided here and only reported to the client. Each
+// player owns its own input state, inventory, petal loadout, and toast
+// events — none of that is shared with the rest of the world.
 export class Player {
-  constructor(game) {
-    this.game = game;
-    this.id = 0; // sentinel id used in flash events; mobs use uid() >= 1
+  constructor(world) {
+    this.world = world;
+    this.id = uid();
+    this.name = 'Flower';
+    this.input = { tx: 0, tz: 0, ax: 0, az: 0, fps: false, yaw: 0, atk: false, def: false };
+    this.inventory = new Map(); // "type:rarity" -> count
+    this.events = []; // private one-shot events (toasts), flushed per snapshot
     this.pos = new THREE.Vector3(0, 0, 0);
     this.radius = 1.1;
     this.maxHp = 200;
@@ -21,6 +29,23 @@ export class Player {
     this.hitCooldowns = new Map();
     this.knock = new THREE.Vector3();
     this.facing = 0;
+    this.petals = new PetalManager(world, this);
+  }
+
+  toast(text) { this.events.push({ e: 'toast', text }); }
+
+  addToInventory(type, rarity, silent = false) {
+    const key = `${type}:${rarity}`;
+    this.inventory.set(key, (this.inventory.get(key) || 0) + 1);
+    if (!silent) this.toast(`+ ${RARITIES[rarity].name} ${PETAL_TYPES[type].name}`);
+  }
+
+  takeFromInventory(key) {
+    const n = this.inventory.get(key) || 0;
+    if (n <= 0) return null;
+    if (n === 1) this.inventory.delete(key); else this.inventory.set(key, n - 1);
+    const [type, rarity] = key.split(':');
+    return { type, rarity: Number(rarity) };
   }
 
   xpForNext() { return Math.floor(60 * Math.pow(1.25, this.level - 1)); }
@@ -30,14 +55,14 @@ export class Player {
     while (this.xp >= this.xpForNext()) {
       this.xp -= this.xpForNext();
       this.level++;
-      this.game.toast(`Level ${this.level}!`);
+      this.toast(`Level ${this.level}!`);
     }
   }
 
   damage(amount) {
     if (this.dead) return;
     this.hp -= amount;
-    this.game.events.push({ e: 'flash', id: this.id });
+    this.world.events.push({ e: 'flash', k: 'player', id: this.id });
     if (this.hp <= 0) {
       this.hp = 0;
       this.dead = true;
@@ -50,7 +75,7 @@ export class Player {
   }
 
   update(dt) {
-    const input = this.game.input;
+    const input = this.input;
 
     if (this.dead) {
       this.deadTimer -= dt;

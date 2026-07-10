@@ -43,6 +43,7 @@ export class Input {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     window.addEventListener('keydown', (e) => {
+      if (e.target instanceof HTMLInputElement) return; // typing a name, not playing
       const k = e.key.toLowerCase();
       this.keys.add(k);
       if (!e.repeat && this.handlers[k]) this.handlers[k]();
