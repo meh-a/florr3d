@@ -1,4 +1,4 @@
-import { PETAL_TYPES, RARITIES } from '../shared/config.js';
+import { PETAL_TYPES, RARITIES, VIEW_RADIUS } from '../shared/config.js';
 import { Player } from './player.js';
 import { MobManager } from './mobs.js';
 import { DropManager } from './drops.js';
@@ -105,62 +105,92 @@ export class World {
     updateCombat(this, dt);
   }
 
-  // Build one snapshot per player. The public payload (players, mobs,
-  // drops, missiles, shared events) is computed once; each recipient gets
-  // it plus a private slice — their own inventory, xp, and toasts — which
-  // must never be sent to anyone else. Flushes all one-shot events.
+  // Build one snapshot per player. Entity entries are serialized once and
+  // shared; each recipient then gets only the entities within VIEW_RADIUS
+  // of their own player (interest management — everything farther is deep
+  // in the fog and off-camera anyway), plus a private slice — their own
+  // inventory, xp, and toasts — which must never be sent to anyone else.
+  // Flushes all one-shot events.
   buildSnapshots() {
-    const shared = {
-      t: 'state',
-      time: r2(this.time),
-      players: [...this.players.values()].map((p) => ({
-        id: p.id, name: p.name,
-        x: r2(p.pos.x), z: r2(p.pos.z), facing: r2(p.facing),
-        hp: r2(p.hp), maxHp: p.maxHp, level: p.level,
-        dead: p.dead, deadTimer: r2(p.deadTimer),
-        petals: {
-          rotFactor: p.petals.rotFactor,
-          primary: p.petals.primary,
-          secondary: p.petals.secondary,
-          instances: p.petals.instances.map((inst) => ({
-            id: inst.id, slot: inst.slotIdx, type: inst.type, rarity: inst.rarity,
-            alive: inst.alive, x: r2(inst.pos.x), z: r2(inst.pos.z),
-            // reload fraction remaining (0 = ready), drives the UI pie sweep
-            cd: inst.alive ? 0 : r2(Math.min(1, Math.max(0, inst.cooldown / inst.reload))),
-          })),
-        },
-      })),
-      mobs: this.mobs.mobs.map((m) => ({
-        id: m.id, type: m.type, rarity: m.rarity,
-        x: r2(m.pos.x), z: r2(m.pos.z), facing: r2(m.facing),
-        hp: r2(m.hp), maxHp: r2(m.maxHp),
-        // flight fields only exist for airborne mobs (hornet)
-        ...(m.flight ? { y: r2(m.pos.y), pitch: r2(m.pitch), loaded: m.loaded } : {}),
-      })),
-      missiles: this.mobs.missiles.map((mi) => ({
-        id: mi.id, rarity: mi.rarity,
-        x: r2(mi.pos.x), y: r2(mi.pos.y), z: r2(mi.pos.z),
-        yaw: r2(mi.yaw), pitch: r2(mi.pitch),
-      })),
-      pmissiles: [...this.players.values()].flatMap((p) =>
-        p.petals.projectiles.map((proj) => ({
-          id: proj.id, type: proj.type, rarity: proj.rarity,
-          x: r2(proj.pos.x), z: r2(proj.pos.z), yaw: r2(proj.yaw),
-        }))),
-      drops: this.drops.drops.map((d) => ({
-        id: d.id, type: d.type, rarity: d.rarity, x: r2(d.pos.x), z: r2(d.pos.z),
-      })),
+    const tag = (list, entryOf) => list.map((o) => {
+      const pos = o.pos;
+      return { x: pos.x, z: pos.z, entry: entryOf(o) };
+    });
+
+    const playerEntries = tag([...this.players.values()], (p) => ({
+      id: p.id, name: p.name,
+      x: r2(p.pos.x), z: r2(p.pos.z), facing: r2(p.facing),
+      hp: r2(p.hp), maxHp: p.maxHp, level: p.level,
+      dead: p.dead, deadTimer: r2(p.deadTimer),
+      petals: {
+        rotFactor: p.petals.rotFactor,
+        primary: p.petals.primary,
+        secondary: p.petals.secondary,
+        instances: p.petals.instances.map((inst) => ({
+          id: inst.id, slot: inst.slotIdx, type: inst.type, rarity: inst.rarity,
+          alive: inst.alive, x: r2(inst.pos.x), z: r2(inst.pos.z),
+          // reload fraction remaining (0 = ready), drives the UI pie sweep
+          cd: inst.alive ? 0 : r2(Math.min(1, Math.max(0, inst.cooldown / inst.reload))),
+        })),
+      },
+    }));
+
+    const mobEntries = tag(this.mobs.mobs, (m) => ({
+      id: m.id, type: m.type, rarity: m.rarity,
+      x: r2(m.pos.x), z: r2(m.pos.z), facing: r2(m.facing),
+      hp: r2(m.hp), maxHp: r2(m.maxHp),
+      // flight fields only exist for airborne mobs (hornet)
+      ...(m.flight ? { y: r2(m.pos.y), pitch: r2(m.pitch), loaded: m.loaded } : {}),
+    }));
+
+    const missileEntries = tag(this.mobs.missiles, (mi) => ({
+      id: mi.id, rarity: mi.rarity,
+      x: r2(mi.pos.x), y: r2(mi.pos.y), z: r2(mi.pos.z),
+      yaw: r2(mi.yaw), pitch: r2(mi.pitch),
+    }));
+
+    const pmissileEntries = [...this.players.values()].flatMap((p) =>
+      tag(p.petals.projectiles, (proj) => ({
+        id: proj.id, type: proj.type, rarity: proj.rarity,
+        x: r2(proj.pos.x), z: r2(proj.pos.z), yaw: r2(proj.yaw),
+      })));
+
+    const dropEntries = tag(this.drops.drops, (d) => ({
+      id: d.id, type: d.type, rarity: d.rarity, x: r2(d.pos.x), z: r2(d.pos.z),
+    }));
+
+    // events with a position (damage numbers) are scoped like entities;
+    // positionless ones (flashes) go to everyone — the client no-ops any
+    // whose target it isn't rendering
+    const posEvents = this.events.filter((ev) => typeof ev.x === 'number');
+    const globalEvents = this.events.filter((ev) => typeof ev.x !== 'number');
+
+    const R2 = VIEW_RADIUS * VIEW_RADIUS;
+    const near = (list, px, pz) => {
+      const outList = [];
+      for (const e of list) {
+        const dx = e.x - px, dz = e.z - pz;
+        if (dx * dx + dz * dz <= R2) outList.push(e.entry ?? e);
+      }
+      return outList;
     };
 
     const out = new Map(); // playerId -> snapshot
     for (const p of this.players.values()) {
+      const px = p.pos.x, pz = p.pos.z;
       out.set(p.id, {
-        ...shared,
+        t: 'state',
+        time: r2(this.time),
         you: p.id,
+        players: near(playerEntries, px, pz), // always includes yourself (distance 0)
+        mobs: near(mobEntries, px, pz),
+        missiles: near(missileEntries, px, pz),
+        pmissiles: near(pmissileEntries, px, pz),
+        drops: near(dropEntries, px, pz),
         xp: Math.floor(p.xp),
         xpNext: p.xpForNext(),
         inventory: [...p.inventory.entries()],
-        events: [...this.events, ...p.events],
+        events: [...globalEvents, ...near(posEvents, px, pz), ...p.events],
       });
     }
     this.events = [];

@@ -75,6 +75,11 @@ export const MAP_TILES = [
   { gx: 2, gz: 0, type: 'water' },
 ];
 export const MOB_CAP = 22;
+// interest management: each client only receives entities within this range
+// of its own player. Past ~110 units everything is deep in the fog (which
+// runs 90->190) and far outside the top-down camera's view, so the cutoff
+// is invisible in practice while capping per-client snapshot size.
+export const VIEW_RADIUS = 110;
 export const PLAYER_BODY_DAMAGE = 10;
 export const HIT_COOLDOWN = 0.45;    // seconds between damage ticks for a touching pair
 
