@@ -2,3 +2,5 @@ node_modules/
 dist/
 dist-*/
 MULTIPLAYER_PLAN.md
+secrets.txt
+accounts.db*

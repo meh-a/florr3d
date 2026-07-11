@@ -128,6 +128,13 @@
                transition: transform 0.08s; }
     #playbtn:hover { transform: scale(1.06); }
     #playbtn:active { transform: scale(0.97); }
+    #authrow { display: flex; gap: 10px; align-items: center; font-size: 14px; min-height: 34px; }
+    #loginbtn { font-weight: 700; font-size: 14px; color: #fff; text-decoration: none;
+                background: #5865f2; border: 3px solid #4351c9; border-radius: 999px;
+                padding: 6px 16px; transition: transform 0.08s; }
+    #loginbtn:hover { transform: scale(1.06); }
+    #authrow .hidden, #loginbtn.hidden { display: none; }
+    #logoutbtn { color: #cfd4ff; margin-left: 6px; cursor: pointer; text-decoration: underline; }
 
     /* toasts */
     #toasts { position: absolute; top: 90px; left: 50%; transform: translateX(-50%);
@@ -184,6 +191,10 @@
       <div class="namerow">
         <input id="nameinput" maxlength="16" placeholder="Flower" autocomplete="off" />
         <button id="playbtn">Play</button>
+      </div>
+      <div id="authrow">
+        <a id="loginbtn" class="hidden" href="/auth/discord">Sign in with Discord</a>
+        <span id="authstate" class="stroke"></span>
       </div>
     </div>
     <div id="death">

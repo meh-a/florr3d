@@ -34,6 +34,41 @@ export class Player {
 
   toast(text) { this.events.push({ e: 'toast', text }); }
 
+  // ---- account persistence: what survives across sessions ----
+
+  serializeSave() {
+    return {
+      v: 1,
+      level: this.level,
+      xp: Math.floor(this.xp),
+      inventory: [...this.inventory.entries()],
+      primary: this.petals.primary,
+      secondary: this.petals.secondary,
+    };
+  }
+
+  applySave(save) {
+    if (!save || save.v !== 1) return;
+    const slot = (s) => (s && PETAL_TYPES[s.type] && RARITIES[s.rarity]
+      ? { type: s.type, rarity: s.rarity } : null);
+    if (Number.isInteger(save.level) && save.level >= 1) this.level = Math.min(save.level, 200);
+    if (Number.isFinite(save.xp) && save.xp >= 0) this.xp = save.xp;
+    if (Array.isArray(save.inventory)) {
+      for (const [key, count] of save.inventory) {
+        if (typeof key !== 'string' || !Number.isInteger(count) || count <= 0) continue;
+        const [type, rarity] = key.split(':');
+        if (PETAL_TYPES[type] && RARITIES[Number(rarity)]) this.inventory.set(key, count);
+      }
+    }
+    if (Array.isArray(save.primary)) {
+      this.petals.primary = this.petals.primary.map((cur, i) => slot(save.primary[i]) ?? cur);
+    }
+    if (Array.isArray(save.secondary)) {
+      this.petals.secondary = this.petals.secondary.map((cur, i) => slot(save.secondary[i]));
+    }
+    this.petals.rebuildAll();
+  }
+
   addToInventory(type, rarity, silent = false) {
     const key = `${type}:${rarity}`;
     this.inventory.set(key, (this.inventory.get(key) || 0) + 1);

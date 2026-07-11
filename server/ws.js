@@ -1,7 +1,10 @@
 import { WebSocketServer } from 'ws';
 import { World } from './world.js';
+import { sessionFromCookie } from './auth.js';
+import { loadSave, writeSave } from './db.js';
 
 const TICK_MS = 1000 / 30;
+const AUTOSAVE_MS = 60_000;
 
 // Attach the game websocket endpoint to an existing http server (the vite
 // dev/preview server in development, or server/index.js standalone). Uses
@@ -19,7 +22,16 @@ export function attachGameServer(httpServer, path = '/ws') {
   const world = new World();
   const sockets = new Map();    // playerId -> ws
   const spectators = new Map(); // ws -> { key, target } for pre-join connections
+  const accounts = new Map();   // playerId -> accountId, for logged-in players
   let nextSpecKey = 1;
+
+  // periodic safety net; the authoritative save happens on disconnect
+  setInterval(() => {
+    for (const [playerId, accountId] of accounts) {
+      const player = world.players.get(playerId);
+      if (player) writeSave(accountId, player.serializeSave());
+    }
+  }, AUTOSAVE_MS);
 
   httpServer.on('upgrade', (req, socket, head) => {
     const { pathname } = new URL(req.url, 'http://localhost');
@@ -50,8 +62,9 @@ export function attachGameServer(httpServer, path = '/ws') {
     }
   }, TICK_MS);
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
     let player = null; // spawned lazily by `join`, not on connect
+    const accountId = sessionFromCookie(req?.headers?.cookie);
     spectators.set(ws, { key: `spec${nextSpecKey++}`, target: null });
 
     ws.on('message', (data) => {
@@ -63,6 +76,13 @@ export function attachGameServer(httpServer, path = '/ws') {
           spectators.delete(ws);
           player = world.addPlayer();
           sockets.set(player.id, ws);
+          // logged in: restore saved progress — unless this account is
+          // already playing on another connection (would duplicate the
+          // save on the two disconnects); the extra tab plays as a guest
+          if (accountId != null && ![...accounts.values()].includes(accountId)) {
+            player.applySave(loadSave(accountId));
+            accounts.set(player.id, accountId);
+          }
           try { world.handle(player.id, msg); } catch (err) { console.error('bad message', err); }
         }
         return;
@@ -72,6 +92,11 @@ export function attachGameServer(httpServer, path = '/ws') {
     ws.on('close', () => {
       spectators.delete(ws);
       if (player) {
+        const acct = accounts.get(player.id);
+        if (acct != null) {
+          writeSave(acct, player.serializeSave());
+          accounts.delete(player.id);
+        }
         sockets.delete(player.id);
         world.removePlayer(player.id);
       }

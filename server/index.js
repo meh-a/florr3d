@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { attachGameServer } from './ws.js';
+import { handleAuth } from './auth.js';
 
 const DIST = fileURLToPath(new URL('../dist', import.meta.url));
 const MIME = {
@@ -18,6 +19,7 @@ const MIME = {
 
 const port = Number(process.env.PORT) || 8081;
 const server = http.createServer(async (req, res) => {
+  if (await handleAuth(req, res)) return;
   const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
   // resolve inside dist/ only; normalize() defuses ../ traversal
   const rel = normalize(pathname).replace(/^(\.\.[/\\])+/, '');

@@ -72,6 +72,26 @@ Promise.all([
   document.getElementById('playbtn').addEventListener('click', submitName);
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitName(); });
 
+  // account state on the gate: logged in -> progress persists; the button
+  // only appears once /auth/me confirms a server with auth routes exists
+  // (the worker fallback has neither accounts nor persistence)
+  const loginBtn = document.getElementById('loginbtn');
+  const authState = document.getElementById('authstate');
+  fetch('/auth/me').then((r) => (r.ok ? r.json() : null)).then((me) => {
+    if (!me) return;
+    if (!me.loggedIn) {
+      loginBtn.classList.remove('hidden');
+      return;
+    }
+    authState.textContent = `Signed in as ${me.username}`;
+    const logout = document.createElement('a');
+    logout.id = 'logoutbtn';
+    logout.href = '/auth/logout';
+    logout.textContent = 'log out';
+    authState.append(logout);
+    if (!nameInput.value) nameInput.value = me.username.slice(0, 16);
+  }).catch(() => {});
+
   // hotkeys — the view toggle is local, everything else is a server intent
   game.input.on('f', () => {
     game.fpsMode = !game.fpsMode;
