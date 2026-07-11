@@ -16,6 +16,12 @@ export class Player {
     this.input = { tx: 0, tz: 0, ax: 0, az: 0, fps: false, yaw: 0, atk: false, def: false };
     this.inventory = new Map(); // "type:rarity" -> count
     this.events = []; // private one-shot events (toasts), flushed per snapshot
+    // private-slice dirty flags: inventory and xp are only put in a
+    // snapshot when they changed since the last one (they're the bulkiest
+    // per-tick payload and change rarely). True at construction so the
+    // first snapshot always carries the full slice.
+    this.invDirty = true;
+    this.xpDirty = true;
     this.pos = new THREE.Vector3(0, 0, 0);
     this.radius = 1.1;
     this.maxHp = 200;
@@ -66,12 +72,15 @@ export class Player {
     if (Array.isArray(save.secondary)) {
       this.petals.secondary = this.petals.secondary.map((cur, i) => slot(save.secondary[i]));
     }
+    this.invDirty = true;
+    this.xpDirty = true;
     this.petals.rebuildAll();
   }
 
   addToInventory(type, rarity, silent = false) {
     const key = `${type}:${rarity}`;
     this.inventory.set(key, (this.inventory.get(key) || 0) + 1);
+    this.invDirty = true;
     if (!silent) this.toast(`+ ${RARITIES[rarity].name} ${PETAL_TYPES[type].name}`);
   }
 
@@ -79,6 +88,7 @@ export class Player {
     const n = this.inventory.get(key) || 0;
     if (n <= 0) return null;
     if (n === 1) this.inventory.delete(key); else this.inventory.set(key, n - 1);
+    this.invDirty = true;
     const [type, rarity] = key.split(':');
     return { type, rarity: Number(rarity) };
   }
@@ -87,6 +97,7 @@ export class Player {
 
   gainXp(amount) {
     this.xp += amount;
+    this.xpDirty = true;
     while (this.xp >= this.xpForNext()) {
       this.xp -= this.xpForNext();
       this.level++;

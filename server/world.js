@@ -207,7 +207,7 @@ export class World {
     const out = new Map(); // playerId -> snapshot
     for (const p of this.players.values()) {
       const px = p.pos.x, pz = p.pos.z;
-      out.set(p.id, {
+      const snap = {
         t: 'state',
         time: r2(this.time),
         you: p.id,
@@ -216,11 +216,20 @@ export class World {
         missiles: near(missileEntries, px, pz),
         pmissiles: near(pmissileEntries, px, pz),
         drops: near(dropEntries, px, pz),
-        xp: Math.floor(p.xp),
-        xpNext: p.xpForNext(),
-        inventory: [...p.inventory.entries()],
         events: [...globalEvents, ...near(posEvents, px, pz), ...p.events],
-      });
+      };
+      // private slice rides along only when it changed (the client caches
+      // the last received values); the first snapshot always has it
+      if (p.xpDirty) {
+        snap.xp = Math.floor(p.xp);
+        snap.xpNext = p.xpForNext();
+        p.xpDirty = false;
+      }
+      if (p.invDirty) {
+        snap.inventory = [...p.inventory.entries()];
+        p.invDirty = false;
+      }
+      out.set(p.id, snap);
     }
     for (const s of spectators) {
       out.set(s.key, {

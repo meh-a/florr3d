@@ -25,6 +25,10 @@ Promise.all([
   document.fonts.load('bold 40px Ubuntu'),
 ]).catch(() => {}).then(() => {
   game.entities = new EntitySync(game);
+  // the private slice (inventory/xp) only rides along in snapshots where
+  // it changed; cache the last received values and fill them back in so
+  // the UI always sees a complete state
+  const priv = { inventory: [], xp: 0, xpNext: 60 };
   game.net = new Net({
     onState: (state) => {
       // the shared world sends all players; pick out our own entry and
@@ -37,7 +41,10 @@ Promise.all([
         game.entities.apply(state);
         return;
       }
-      state.player = { ...me, xp: state.xp, xpNext: state.xpNext };
+      if (state.inventory) priv.inventory = state.inventory;
+      else state.inventory = priv.inventory;
+      if (typeof state.xp === 'number') { priv.xp = state.xp; priv.xpNext = state.xpNext; }
+      state.player = { ...me, xp: priv.xp, xpNext: priv.xpNext };
       state.petals = me.petals;
       game.entities.apply(state);
       game.ui.applyState(state);
