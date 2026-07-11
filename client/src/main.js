@@ -92,6 +92,9 @@ Promise.all([
     if (!me) return;
     if (!me.loggedIn) {
       loginBtn.classList.remove('hidden');
+      // guests lose everything on a server restart — say so where the
+      // decision is made, right next to the login button
+      document.getElementById('loginnudge').classList.remove('hidden');
       return;
     }
     authState.textContent = `Signed in as ${me.username}`;

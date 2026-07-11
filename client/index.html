@@ -148,6 +148,8 @@
     #loginbtn:hover { transform: scale(1.06); }
     #authrow .hidden, #loginbtn.hidden { display: none; }
     #logoutbtn { color: #cfd4ff; margin-left: 6px; cursor: pointer; text-decoration: underline; }
+    #loginnudge { font-size: 14px; color: #ffe763; text-align: center; line-height: 1.5; }
+    #loginnudge.hidden { display: none; }
 
     /* toasts */
     #toasts { position: absolute; top: 90px; left: 50%; transform: translateX(-50%);
@@ -210,6 +212,7 @@
         <a id="loginbtn" class="hidden" href="/auth/discord">Sign in with Discord</a>
         <span id="authstate" class="stroke"></span>
       </div>
+      <div id="loginnudge" class="stroke hidden">Guest progress is lost when the server restarts —<br />sign in to keep your petals and level!</div>
     </div>
     <div id="death">
       <div class="big stroke">You died</div>
