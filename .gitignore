@@ -4,3 +4,4 @@ dist-*/
 MULTIPLAYER_PLAN.md
 secrets.txt
 accounts.db*
+client/assets-src/

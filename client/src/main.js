@@ -6,6 +6,8 @@ import { Effects } from './effects.js';
 import { EntitySync } from './entities.js';
 import { Arrows } from './arrows.js';
 import { Net } from './net.js';
+import { preloadMobModels } from './mobmodels.js';
+import { MOB_TYPES } from '../../shared/config.js';
 import { initQualityToggle } from './settings.js';
 
 const INPUT_RATE = 1 / 30; // seconds between input packets, matches server tick
@@ -19,6 +21,9 @@ game.input = new Input(renderer.domElement, camera);
 game.ui = new UI(game);
 game.effects = new Effects(game);
 initQualityToggle();
+// fetch mob models while the visitor is still on the name gate — cached
+// immutably, so this is a no-op network-wise after the first visit
+preloadMobModels([...Object.keys(MOB_TYPES), 'hornetmissile']);
 
 // wait for Ubuntu to be ready so damage numbers don't flash a fallback font
 Promise.all([

@@ -59,6 +59,12 @@ export function flashMaterials(root, duration = 0.12) {
   root.userData.flashUntil = performance.now() + duration * 1000;
   root.traverse((obj) => {
     if (obj.isMesh && obj.material && obj.material.emissive !== undefined) {
+      // some imported models carry their color IN the emissive channel, so
+      // remember the real value and restore it — resetting to black would
+      // wipe the model's paint job after the first hit
+      if (obj.material.userData.baseEmissive === undefined) {
+        obj.material.userData.baseEmissive = obj.material.emissive.getHex();
+      }
       obj.material.emissive.setScalar(0.55);
     }
   });
@@ -69,7 +75,7 @@ export function updateFlash(root) {
   if (performance.now() > root.userData.flashUntil) {
     root.traverse((obj) => {
       if (obj.isMesh && obj.material && obj.material.emissive !== undefined) {
-        obj.material.emissive.setScalar(0);
+        obj.material.emissive.setHex(obj.material.userData.baseEmissive ?? 0);
       }
     });
     delete root.userData.flashUntil;

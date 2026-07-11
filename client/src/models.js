@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { toonMat, addOutline, makeRockGeometry, enableShadows } from './utils.js';
+import { hasMobModel, swapInMobModel } from './mobmodels.js';
 import { PETAL_TYPES, RARITIES } from '../../shared/config.js';
 
 const YELLOW = '#ffe763';
@@ -198,8 +199,17 @@ function makeHornetMob(radius) {
   enableShadows(group, { cast: true, receive: true });
 
   // wings go on after enableShadows: translucent planes shouldn't cast solid
-  // shadows. Root of each wing is at its pivot, blade extends +X, so the
-  // pivot's rotation.z flaps it; the right pivot is yaw-mirrored.
+  // shadows
+  group.userData.wingPivots = addHornetWings(group, radius, lift + a * 0.85, c * 0.05);
+
+  return group;
+}
+
+// Translucent flapping wing pair, shared by the procedural hornet and the
+// glb model (which ships wingless). Root of each wing is at its pivot, the
+// blade extends +X, so the pivot's rotation.z flaps it; the right pivot is
+// yaw-mirrored. Returns the pivots for the per-frame flap animation.
+function addHornetWings(group, radius, y, z) {
   const wingGeo = sharedGeo(`hornet-wing-${radius}`, () => {
     const geo = new THREE.CircleGeometry(1, 14);
     geo.translate(1, 0, 0);
@@ -212,7 +222,7 @@ function makeHornetMob(radius) {
   const wingPivots = [];
   for (const sx of [-1, 1]) {
     const pivot = new THREE.Group();
-    pivot.position.set(sx * radius * 0.12, lift + a * 0.85, c * 0.05);
+    pivot.position.set(sx * radius * 0.12, y, z);
     pivot.rotation.y = sx === 1 ? -0.5 : Math.PI + 0.5; // sweep both wings back
     const wing = new THREE.Mesh(wingGeo, wingMat);
     wing.rotation.x = -Math.PI / 2; // lay the blade flat
@@ -221,12 +231,11 @@ function makeHornetMob(radius) {
     group.add(pivot);
     wingPivots.push(pivot);
   }
-  group.userData.wingPivots = wingPivots;
-
-  return group;
+  return wingPivots;
 }
 
-// Hornet missile projectile: black cone flying nose-first along +Z.
+// Hornet missile projectile flying nose-first along +Z: procedural cone
+// placeholder, swapped for the missile model when it's loaded.
 export function makeMissileMesh(radius) {
   const group = new THREE.Group();
   const cone = new THREE.Mesh(
@@ -237,6 +246,7 @@ export function makeMissileMesh(radius) {
   addOutline(cone, 0.15, '#000000');
   group.add(cone);
   enableShadows(group, { cast: true, receive: false });
+  swapInMobModel(group, 'hornetmissile', radius * 0.65, null, { centerY: true });
   return group;
 }
 
@@ -314,11 +324,35 @@ export function makeHealthBar(width, anisotropy = 1) {
 }
 
 export function makeMobMesh(type, radius) {
-  if (type === 'rock') return makeRockMob(radius);
-  if (type === 'ladybug') return makeLadybugMob(radius);
-  if (type === 'bee') return makeBeeMob(radius);
-  if (type === 'hornet') return makeHornetMob(radius);
-  throw new Error(`unknown mob type ${type}`);
+  let group;
+  if (type === 'rock') return makeRockMob(radius); // no model — stays procedural
+  else if (type === 'ladybug') group = makeLadybugMob(radius);
+  else if (type === 'bee') group = makeBeeMob(radius);
+  else if (type === 'hornet') group = makeHornetMob(radius);
+  else throw new Error(`unknown mob type ${type}`);
+
+  // procedural mesh doubles as a placeholder: the real model swaps in when
+  // its (usually cached) download finishes
+  if (hasMobModel(type)) {
+    swapInMobModel(group, type, radius, (g, inst, r) => {
+      if (type !== 'hornet') return;
+      // the glb replaces the procedural tail missile, but the server's
+      // `loaded` flag still needs a visible docked shot — mount the missile
+      // model nose-out against the tail
+      const box = new THREE.Box3().setFromObject(inst);
+      const missile = new THREE.Group();
+      missile.rotation.y = Math.PI; // nose out the tail (-Z)
+      // tucked well into the body, only the nose end pokes out the tail
+      missile.position.set(0, (box.min.y + box.max.y) / 2, box.min.z + r * 0.25);
+      swapInMobModel(missile, 'hornetmissile', r * 0.3, null, { centerY: true });
+      g.add(missile);
+      g.userData.missile = missile;
+      // the glb has no wings — re-add the translucent flapping pair, seated
+      // against the model's back (also keeps the flier update path alive)
+      g.userData.wingPivots = addHornetWings(g, r, box.max.y * 0.9, (box.min.z + box.max.z) * 0.2);
+    });
+  }
+  return group;
 }
 
 export function makePetalMesh(type, radius) {

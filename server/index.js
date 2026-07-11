@@ -15,6 +15,7 @@ const DIST = fileURLToPath(new URL('../dist', import.meta.url));
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json',
+  '.glb': 'model/gltf-binary', '.jpg': 'image/jpeg',
 };
 
 const port = Number(process.env.PORT) || 8081;
@@ -24,15 +25,25 @@ const server = http.createServer(async (req, res) => {
   // resolve inside dist/ only; normalize() defuses ../ traversal
   const rel = normalize(pathname).replace(/^(\.\.[/\\])+/, '');
   const file = join(DIST, rel === '/' || rel === '\\' ? 'index.html' : rel);
+  // vite emits content-hashed filenames under /assets/, so those can be
+  // cached forever — a returning player re-downloads a model or bundle only
+  // when its content actually changed. Everything else (index.html, icons)
+  // must revalidate so deploys propagate.
+  const cache = rel.startsWith('/assets/') || rel.startsWith('\\assets\\')
+    ? 'public, max-age=31536000, immutable'
+    : 'no-cache';
   try {
     const body = await readFile(file);
-    res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'content-type': MIME[extname(file)] || 'application/octet-stream',
+      'cache-control': cache,
+    });
     res.end(body);
   } catch {
     // SPA-ish fallback: unknown paths get the game page
     try {
       const body = await readFile(join(DIST, 'index.html'));
-      res.writeHead(200, { 'content-type': 'text/html' });
+      res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-cache' });
       res.end(body);
     } catch {
       res.writeHead(503, { 'content-type': 'text/plain' });
