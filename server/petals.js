@@ -61,7 +61,10 @@ export class PetalManager {
 
   swapRows() {
     [this.primary, this.secondary] = [this.secondary, this.primary];
-    for (let i = 0; i < SLOTS; i++) this.replaceSlot(i);
+    // every slot changes at once, so rebuild in one atomic pass (all
+    // reloading in). Per-slot replaceSlot calls would each read the other
+    // slots mid-swap, where new petal counts mismatch the old instances.
+    this.rebuildAll(false);
   }
 
   // place item into row/slot, returning whatever was there
@@ -103,10 +106,10 @@ export class PetalManager {
     return out;
   }
 
-  rebuildAll() {
-    // full (re)build, every slot ready immediately — used only at
-    // construction; swaps/equips go through replaceSlot instead so they
-    // don't disturb petals in slots that weren't touched
+  rebuildAll(readyNow = true) {
+    // full (re)build of every slot: ready immediately at construction,
+    // reloading in on a row swap. Single-slot swaps/equips go through
+    // replaceSlot instead so they don't disturb untouched slots.
     this.instances = [];
     const counts = this.primary.map((s) => (s ? PETAL_TYPES[s.type].count : 0));
     const total = counts.reduce((a, b) => a + b, 0);
@@ -115,7 +118,7 @@ export class PetalManager {
     let posIdx = 0;
     this.primary.forEach((slot, slotIdx) => {
       if (!slot) return;
-      this.instances.push(...this.makeInstances(slot, slotIdx, total, posIdx, true));
+      this.instances.push(...this.makeInstances(slot, slotIdx, total, posIdx, readyNow));
       posIdx += PETAL_TYPES[slot.type].count;
     });
   }
@@ -149,10 +152,19 @@ export class PetalManager {
         rebuilt.push(...this.makeInstances(slot, i, total, posIdx, false));
       } else {
         const existing = bySlot.get(i) || [];
-        for (let j = 0; j < counts[i]; j++) {
-          const inst = existing[j];
-          inst.angleFrac = (posIdx + j) / total;
-          rebuilt.push(inst);
+        const stale = existing.length !== counts[i]
+          || existing[0].type !== slot.type || existing[0].rarity !== slot.rarity;
+        if (stale) {
+          // this slot's instances don't match its petal (e.g. leftovers
+          // from an interrupted multi-slot change) — rebuild instead of
+          // walking off the end of `existing`
+          rebuilt.push(...this.makeInstances(slot, i, total, posIdx, false));
+        } else {
+          for (let j = 0; j < counts[i]; j++) {
+            const inst = existing[j];
+            inst.angleFrac = (posIdx + j) / total;
+            rebuilt.push(inst);
+          }
         }
       }
       posIdx += counts[i];
