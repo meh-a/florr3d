@@ -25,7 +25,20 @@ const MAX_BUFFERED = 1_000_000;
 // A single tick loop advances the world and sends each connection its own
 // per-recipient snapshot (own inventory/toasts stay private).
 export function attachGameServer(httpServer, path = '/ws') {
-  const wss = new WebSocketServer({ noServer: true });
+  // permessage-deflate: snapshots are repetitive JSON and compress ~5-10x.
+  // No context takeover on either side — a shared zlib context per
+  // connection is the classic ws memory-bloat footgun, and per-message
+  // compression at level 1 keeps CPU negligible at 30Hz while giving up
+  // little ratio on JSON. Browsers negotiate this transparently.
+  const wss = new WebSocketServer({
+    noServer: true,
+    perMessageDeflate: {
+      serverNoContextTakeover: true,
+      clientNoContextTakeover: true,
+      zlibDeflateOptions: { level: 1 },
+      threshold: 256, // don't bother compressing tiny frames
+    },
+  });
   const world = new World();
   const sockets = new Map();    // playerId -> ws
   const spectators = new Map(); // ws -> { key, target } for pre-join connections
