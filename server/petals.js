@@ -76,7 +76,7 @@ export class PetalManager {
   makeInstances(slot, slotIdx, total, startPosIdx, readyNow) {
     const def = PETAL_TYPES[slot.type];
     const rarity = RARITIES[slot.rarity];
-    const mult = rarity.statMult;
+    const mult = rarity.petalMult;
     const size = def.radius * (1 + slot.rarity * 0.12);
     const out = [];
     for (let j = 0; j < def.count; j++) {
@@ -89,7 +89,7 @@ export class PetalManager {
         radius: size,
         maxHp: def.hp * mult,
         hp: def.hp * mult,
-        dmg: def.dmg * rarity.dmgMult,
+        dmg: def.dmg * rarity.petalMult,
         heal: (def.heal || 0) * mult,
         reload: def.reload,
         // a freshly-built loadout (construction) is ready immediately; a

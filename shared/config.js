@@ -1,14 +1,18 @@
-// Rarity table, matching the florr.io wiki's per-rarity multipliers.
-// statMult scales health (and heal/xp); dmgMult scales damage (flat x3 per
-// tier); armorMult scales armor. All are relative to Common = 1.
+// Rarity table. Mobs and petals scale differently:
+// - statMult scales mob health (and xp), dmgMult mob damage (flat x3 per
+//   tier), armorMult mob armor — the game's own curves, deliberately
+//   steeper than the wiki so high-rarity mobs stay boss-like.
+// - petalMult scales petal health, damage, and heal with the florr.io
+//   wiki's uniform per-rarity sequence.
+// All are relative to Common = 1.
 export const RARITIES = [
-  { name: 'Common',    color: '#7eef6d', statMult: 1,      dmgMult: 1,   armorMult: 1,   weight: 55,   scale: 1.0  },
-  { name: 'Unusual',   color: '#ffe65d', statMult: 3.75,   dmgMult: 3,   armorMult: 2,   weight: 25,   scale: 1.3  },
-  { name: 'Rare',      color: '#4d52e3', statMult: 13.5,   dmgMult: 9,   armorMult: 7,   weight: 12,   scale: 1.7  },
-  { name: 'Epic',      color: '#861fde', statMult: 54,     dmgMult: 27,  armorMult: 22,  weight: 6,    scale: 2.2  },
-  { name: 'Legendary', color: '#de1f1f', statMult: 324,    dmgMult: 81,  armorMult: 65,  weight: 2,    scale: 3.0  },
-  { name: 'Mythic',    color: '#1fdbde', statMult: 3159,   dmgMult: 243, armorMult: 194, weight: 0.4,  scale: 4.2  },
-  { name: 'Ultra',     color: '#ff2b75', statMult: 196830, dmgMult: 729, armorMult: 583, weight: 0.08, scale: 5.5  },
+  { name: 'Common',    color: '#7eef6d', petalMult: 1,     statMult: 1,      dmgMult: 1,   armorMult: 1,   weight: 55,   scale: 1.0  },
+  { name: 'Unusual',   color: '#ffe65d', petalMult: 1.5,   statMult: 3.75,   dmgMult: 3,   armorMult: 2,   weight: 25,   scale: 1.3  },
+  { name: 'Rare',      color: '#4d52e3', petalMult: 4.5,   statMult: 13.5,   dmgMult: 9,   armorMult: 7,   weight: 12,   scale: 1.7  },
+  { name: 'Epic',      color: '#861fde', petalMult: 9,     statMult: 54,     dmgMult: 27,  armorMult: 22,  weight: 6,    scale: 2.2  },
+  { name: 'Legendary', color: '#de1f1f', petalMult: 27,    statMult: 324,    dmgMult: 81,  armorMult: 65,  weight: 2,    scale: 3.0  },
+  { name: 'Mythic',    color: '#1fdbde', petalMult: 48.6,  statMult: 3159,   dmgMult: 243, armorMult: 194, weight: 0.4,  scale: 4.2  },
+  { name: 'Ultra',     color: '#ff2b75', petalMult: 145.8, statMult: 196830, dmgMult: 729, armorMult: 583, weight: 0.08, scale: 5.5  },
 ];
 
 // drops: [petalType|null, weight]
@@ -43,7 +47,7 @@ export const PETAL_TYPES = {
                desc: 'Heavy and durable, with a slow reload.' },
   rose:      { name: 'Rose',    hp: 5,  dmg: 5,  reload: 3.5, radius: 0.42, count: 1, color: '#ff94c9', heal: 11,
                desc: 'Flies home to heal you when you’re hurt.' },
-  light:     { name: 'Light',   hp: 5,  dmg: 7,  reload: 0.6, radius: 0.28, count: 3, color: '#ffffff',
+  light:     { name: 'Light',   hp: 5,  dmg: 13, reload: 0.6, radius: 0.28, count: 3, color: '#ffffff',
                desc: 'Fires in a rapid volley of three.' },
   stinger:   { name: 'Stinger', hp: 8,  dmg: 35, reload: 4,   radius: 0.35, count: 1, color: '#333333',
                desc: 'Fragile, but deals heavy damage.' },
