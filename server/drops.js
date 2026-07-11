@@ -11,7 +11,10 @@ export class DropManager {
   // `owner`: drops are individual loot — each copy belongs to one player,
   // is only sent to them in snapshots, and only they can pick it up
   spawn(type, rarity, pos, owner) {
-    this.drops.push({ id: uid(), type, rarity, pos: pos.clone(), age: 0, owner });
+    // always land on the ground: mobs can die airborne (hornets), but the
+    // client draws drops at ground level and pickup is a 3D distance check —
+    // a drop left at flight altitude would render as collectable yet never be
+    this.drops.push({ id: uid(), type, rarity, pos: pos.clone().setY(0), age: 0, owner });
   }
 
   update(dt) {

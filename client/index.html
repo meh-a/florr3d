@@ -20,6 +20,14 @@
     #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
     #hud > * { pointer-events: auto; }
 
+    /* screen-edge arrows pointing at the nearest flowers (arrows.js) */
+    #arrows { position: fixed; inset: 0; pointer-events: none; z-index: 8; }
+    #arrows .arrow { position: absolute; left: 0; top: 0; }
+    #arrows .arrow.hidden { display: none; }
+    #arrows .glyph { position: absolute; font-size: 30px; color: #ffe763; line-height: 1; }
+    #arrows .label { position: absolute; transform: translate(-50%, 16px);
+                     font-size: 13px; white-space: nowrap; }
+
     /* top-left status: florr-style pill bars on a dark track */
     #status { position: absolute; top: 14px; left: 14px; width: 270px; pointer-events: none; }
     #status .label { font-size: 16px; margin-bottom: 4px; }

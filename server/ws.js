@@ -95,6 +95,25 @@ export function attachGameServer(httpServer, path = '/ws') {
     }
   }, HEARTBEAT_MS);
 
+  // Graceful shutdown (deploys, restarts): save every logged-in player —
+  // the close-handler saves never run when the process is killed, which
+  // used to cost up to AUTOSAVE_MS of progress — and tell every client
+  // this is an update, so they can show "updating…" and reload into the
+  // new bundle instead of silently reconnecting with a stale one.
+  const shutdown = () => {
+    for (const [playerId, accountId] of accounts) {
+      const player = world.players.get(playerId);
+      if (player) writeSave(accountId, player.serializeSave());
+    }
+    const bye = JSON.stringify({ t: 'update' });
+    for (const ws of wss.clients) {
+      if (ws.readyState === ws.OPEN) ws.send(bye);
+    }
+    setTimeout(() => process.exit(0), 300).unref(); // let the sends flush
+  };
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
+
   wss.on('connection', (ws, req) => {
     let player = null; // spawned lazily by `join`, not on connect
     const accountId = sessionFromCookie(req?.headers?.cookie);

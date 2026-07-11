@@ -151,6 +151,7 @@ export class World {
       x: r2(p.pos.x), z: r2(p.pos.z), facing: r2(p.facing),
       hp: r2(p.hp), maxHp: p.maxHp, level: p.level,
       dead: p.dead, deadTimer: r2(p.deadTimer),
+      ...(p.immunity > 0 ? { imm: true } : {}), // renders as a ghosted flower
       petals: {
         rotFactor: p.petals.rotFactor,
         primary: p.petals.primary,
@@ -207,9 +208,19 @@ export class World {
       return outList;
     };
 
+    const alive = [...this.players.values()].filter((pl) => !pl.dead);
     const out = new Map(); // playerId -> snapshot
     for (const p of this.players.values()) {
       const px = p.pos.x, pz = p.pos.z;
+      // the up-to-3 nearest living flowers, wherever they are on the map —
+      // drives the client's direction arrows (unlike `players`, this list
+      // isn't interest-scoped, or it couldn't point beyond the fog)
+      const others = alive
+        .filter((o) => o.id !== p.id)
+        .map((o) => ({ o, d: (o.pos.x - px) ** 2 + (o.pos.z - pz) ** 2 }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 3)
+        .map(({ o }) => ({ name: o.name, x: r2(o.pos.x), z: r2(o.pos.z) }));
       const snap = {
         t: 'state',
         time: r2(this.time),
@@ -219,6 +230,7 @@ export class World {
         missiles: near(missileEntries, px, pz),
         pmissiles: near(pmissileEntries, px, pz),
         drops: near(dropEntries.filter((d) => d.owner === p.id), px, pz),
+        others,
         events: [...globalEvents, ...near(posEvents, px, pz), ...p.events],
       };
       // private slice rides along only when it changed (the client caches

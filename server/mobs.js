@@ -91,16 +91,18 @@ class Mob {
     if (killer) killer.gainXp(this.xp);
     const dropType = pickDrop(this.type);
     if (!dropType) return;
-    // individual loot: one privately-owned copy of the drop for every
-    // still-connected player who dealt enough damage; if the kill was so
-    // spread out that nobody crossed the bar, the top contributor gets it
-    const threshold = this.maxHp * DROP_DAMAGE_FRAC;
-    let owners = [...this.damageBy].filter(([id, dmg]) =>
-      dmg >= threshold && this.world.players.has(id));
+    // individual loot: one privately-owned copy of the drop for everyone who
+    // contributed at least DROP_DAMAGE_FRAC of the damage recorded from
+    // still-connected players. Shares are relative to actual damage dealt —
+    // not max hp — so heavily-armored mobs (where every hit lands as 1) and
+    // credit orphaned by disconnects can't push the bar out of reach. If the
+    // kill was still too spread out, the top contributor gets it.
+    const connected = [...this.damageBy].filter(([id]) => this.world.players.has(id));
+    if (connected.length === 0) return;
+    const total = connected.reduce((sum, [, dmg]) => sum + dmg, 0);
+    let owners = connected.filter(([, dmg]) => dmg >= total * DROP_DAMAGE_FRAC);
     if (owners.length === 0) {
-      const top = [...this.damageBy].filter(([id]) => this.world.players.has(id))
-        .sort((a, b) => b[1] - a[1])[0];
-      owners = top ? [top] : [];
+      owners = [connected.sort((a, b) => b[1] - a[1])[0]];
     }
     for (const [id] of owners) this.world.drops.spawn(dropType, this.rarity, this.pos, id);
   }
@@ -252,7 +254,7 @@ export class MobManager {
     this.mobs = [];
     this.missiles = [];
     this.spawnTimer = 0;
-    for (let i = 0; i < 16; i++) this.trySpawn(true);
+    for (let i = 0; i < 32; i++) this.trySpawn(true);
   }
 
   // weighted type pick: types without a spawnWeight count as 1; types at
@@ -275,17 +277,20 @@ export class MobManager {
   trySpawn(initial = false) {
     if (this.mobs.length >= MOB_CAP) return;
     const players = [...this.world.players.values()];
+    // mostly keep the action near players, but let a quarter of spawns land
+    // anywhere so the far reaches of the map stay populated after the
+    // initial fill (kills only ever happen near players, so player-scoped
+    // respawns alone would slowly drain everywhere else)
+    const anywhere = initial || players.length === 0 || Math.random() < 0.25;
     for (let attempt = 0; attempt < 12; attempt++) {
       const pos = new THREE.Vector3(
         (Math.random() * 2 - 1) * (ARENA_HALF - 8), 0,
         (Math.random() * 2 - 1) * (ARENA_HALF - 8)
       );
-      // never pop in on top of anyone; after the initial fill, also stay
-      // within roaming range of at least one player (any spot is fine
-      // while the world is empty)
+      // never pop in on top of anyone
       const dists = players.map((p) => pos.distanceTo(p.pos));
       if (dists.some((d) => d < 30)) continue;
-      if (!initial && dists.length > 0 && !dists.some((d) => d <= 130)) continue;
+      if (!anywhere && !dists.some((d) => d <= 130)) continue;
       this.mobs.push(new Mob(this.world, this.pickType(), pickRarity(), pos));
       return;
     }
@@ -318,7 +323,7 @@ export class MobManager {
   update(dt) {
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
-      this.spawnTimer = 1;
+      this.spawnTimer = 0.5;
       this.trySpawn();
     }
 

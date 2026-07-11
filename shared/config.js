@@ -31,11 +31,11 @@ export const MOB_TYPES = {
   },
   hornet: {
     name: 'Hornet', hp: 62.5, dmg: 50, armor: 1, radius: 1.7, speed: 2.0, xp: 12,
-    drops: [['missile', 0.35], ['orange', 0.35], [null, 0.3]],
+    drops: [['missile', 0.5], ['orange', 0.5]],
     // rarer spawn than the basic mobs, and never more than a few alive at
     // once — it's much more dangerous
     spawnWeight: 0.35,
-    maxAlive: 3,
+    maxAlive: 6,
     missile: { hp: 5, dmg: 10, speed: 16, radius: 0.45 },
   },
 };
@@ -59,7 +59,7 @@ export const PETAL_TYPES = {
                desc: 'Launches forward as a projectile when attacking.' },
 };
 
-export const ARENA_HALF = 145;       // playable half-extent; ground drawn a bit larger
+export const ARENA_HALF = 185;       // playable half-extent; ground drawn a bit larger
 
 // ---- terrain tiles ----
 // The arena is an implicit grass grid; MAP_TILES sparsely overrides cells by
@@ -78,7 +78,7 @@ export const MAP_TILES = [
   { gx: 1, gz: 0, type: 'water' },
   { gx: 2, gz: 0, type: 'water' },
 ];
-export const MOB_CAP = 22;
+export const MOB_CAP = 44;
 // interest management: each client only receives entities within this range
 // of its own player. Past ~110 units everything is deep in the fog (which
 // runs 90->190) and far outside the top-down camera's view, so the cutoff
@@ -86,9 +86,12 @@ export const MOB_CAP = 22;
 export const VIEW_RADIUS = 110;
 export const PLAYER_BODY_DAMAGE = 10;
 export const HIT_COOLDOWN = 0.45;    // seconds between damage ticks for a touching pair
-// individual loot: everyone who dealt at least this fraction of a mob's max
-// hp gets their own copy of its drop (visible/lootable only by them)
-export const DROP_DAMAGE_FRAC = 0.2;
+// individual loot: everyone who dealt at least this share of the damage
+// recorded from still-connected players gets their own copy of the drop
+// (visible/lootable only by them)
+export const DROP_DAMAGE_FRAC = 0.1;
+// seconds of invulnerability after (re)spawning; attacking ends it early
+export const SPAWN_IMMUNITY = 3;
 
 // works on anything with mutable x/z (THREE.Vector3 or plain objects)
 export function clampToArena(pos, margin = 0) {

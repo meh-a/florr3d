@@ -36,6 +36,35 @@ function makeNameSprite(text) {
   return sprite;
 }
 
+// spawn immunity reads as a blinking flower: while the server says the
+// player can't be hit, opacity pulses each frame (updateImmuneLook, called
+// from the per-frame update); when it wears off everything restores
+function setImmuneLook(root, immune) {
+  immune = !!immune;
+  if (root.userData.immuneLook === immune) return;
+  root.userData.immuneLook = immune;
+  root.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const ud = obj.material.userData;
+    if (ud.baseOpacity === undefined) {
+      ud.baseOpacity = obj.material.opacity;
+      ud.baseTransparent = obj.material.transparent;
+    }
+    obj.material.opacity = ud.baseOpacity;
+    obj.material.transparent = immune || ud.baseTransparent;
+  });
+}
+
+function updateImmuneLook(root) {
+  if (!root.userData.immuneLook) return;
+  const pulse = 0.25 + 0.5 * (0.5 + 0.5 * Math.sin(performance.now() * 0.012));
+  root.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const base = obj.material.userData.baseOpacity;
+    if (base !== undefined) obj.material.opacity = base * pulse;
+  });
+}
+
 // Pure view layer over server snapshots: keeps a mesh per server entity id,
 // creating/removing them as snapshots come in, and lerps toward the latest
 // authoritative positions each render frame so 30Hz snapshots look smooth.
@@ -68,6 +97,7 @@ export class EntitySync {
       this.playerFacing = state.player.facing;
       if (!this.hadPlayer) this.playerMesh.position.copy(this.playerTarget);
       this.hadPlayer = true;
+      setImmuneLook(this.playerMesh, state.player.imm);
     }
 
     // other players: synced collection just like mobs, keyed by player id
@@ -79,6 +109,7 @@ export class EntitySync {
         v.dead = p.dead;
         v.hp = p.hp;
         v.maxHp = p.maxHp;
+        setImmuneLook(v.mesh, p.imm);
         if (p.name !== v.name) this.renamePlayer(v, p.name);
       });
 
@@ -330,6 +361,7 @@ export class EntitySync {
     const targetQ = new THREE.Quaternion().setFromAxisAngle(UP, this.playerFacing);
     this.playerMesh.quaternion.slerp(targetQ, damp(8, dt));
     updateFlash(this.playerMesh);
+    updateImmuneLook(this.playerMesh);
 
     for (const v of this.players.values()) {
       const visible = !v.dead;
@@ -340,6 +372,7 @@ export class EntitySync {
       const q = new THREE.Quaternion().setFromAxisAngle(UP, v.facing);
       v.mesh.quaternion.slerp(q, damp(8, dt));
       updateFlash(v.mesh);
+      updateImmuneLook(v.mesh);
 
       v.greenHp += (v.hp - v.greenHp) * damp(12, dt);
       v.displayHp += (v.hp - v.displayHp) * damp(3, dt);

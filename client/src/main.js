@@ -4,6 +4,7 @@ import { Input } from './input.js';
 import { UI } from './ui.js';
 import { Effects } from './effects.js';
 import { EntitySync } from './entities.js';
+import { Arrows } from './arrows.js';
 import { Net } from './net.js';
 import { initQualityToggle } from './settings.js';
 
@@ -25,6 +26,7 @@ Promise.all([
   document.fonts.load('bold 40px Ubuntu'),
 ]).catch(() => {}).then(() => {
   game.entities = new EntitySync(game);
+  game.arrows = new Arrows(game);
   // the private slice (inventory/xp) only rides along in snapshots where
   // it changed; cache the last received values and fill them back in so
   // the UI always sees a complete state
@@ -47,6 +49,7 @@ Promise.all([
       state.player = { ...me, xp: priv.xp, xpNext: priv.xpNext };
       state.petals = me.petals;
       game.entities.apply(state);
+      game.arrows.setTargets(state.others);
       game.ui.applyState(state);
     },
     onStatus: (mode) => {
@@ -59,6 +62,7 @@ Promise.all([
         online: 'Connected',
         offline: 'Connection lost — retrying…',
         local: 'No server found — running locally',
+        updating: 'Updating…',
       }[mode]);
     },
   });
@@ -114,6 +118,9 @@ Promise.all([
       game.ui.toast('Top-down view');
     }
   });
+  game.input.on('v', () => {
+    game.ui.toast(game.arrows.toggle() ? 'Player arrows on' : 'Player arrows off');
+  });
   game.input.on('r', () => game.net.send({ t: 'swapRows' }));
   game.input.on('q', () => game.net.send({ t: 'rotSpeed', delta: -0.175 }));
   game.input.on('e', () => game.net.send({ t: 'rotSpeed', delta: +0.175 }));
@@ -151,6 +158,7 @@ Promise.all([
     game.effects.update(dt);
 
     updateCamera(dt, game.entities.playerPos(), game.fpsMode ? game.input.look : null);
+    game.arrows.update(); // after the camera move so arrows don't lag a frame
     renderer.render(scene, camera);
   }
   loop();

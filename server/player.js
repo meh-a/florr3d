@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PETAL_TYPES, RARITIES, clampToArena } from '../shared/config.js';
+import { PETAL_TYPES, RARITIES, SPAWN_IMMUNITY, clampToArena } from '../shared/config.js';
 import { uid } from './utils.js';
 import { PetalManager } from './petals.js';
 
@@ -32,6 +32,7 @@ export class Player {
     this.xp = 0;
     this.dead = false;
     this.deadTimer = 0;
+    this.immunity = SPAWN_IMMUNITY; // fresh spawns can't be hit for a moment
     this.hitCooldowns = new Map();
     this.knock = new THREE.Vector3();
     this.facing = 0;
@@ -106,7 +107,7 @@ export class Player {
   }
 
   damage(amount) {
-    if (this.dead) return;
+    if (this.dead || this.immunity > 0) return;
     this.hp -= amount;
     this.world.events.push({ e: 'flash', k: 'player', id: this.id });
     if (this.hp <= 0) {
@@ -130,8 +131,14 @@ export class Player {
         this.hp = this.maxHp;
         this.pos.set(0, 0, 0);
         this.knock.set(0, 0, 0);
+        this.immunity = SPAWN_IMMUNITY;
       }
       return;
+    }
+
+    // immunity runs out on its own, or the moment you go on the offensive
+    if (this.immunity > 0) {
+      this.immunity = input.atk ? 0 : Math.max(0, this.immunity - dt);
     }
 
     this.heal(this.regen * dt);

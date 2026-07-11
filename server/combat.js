@@ -21,8 +21,9 @@ export function updateCombat(world, dt) {
     if (mob.deadFlag) continue;
 
     for (const player of players) {
-      // mob vs player body
-      if (!player.dead) {
+      // mob vs player body — spawn-immune flowers neither take nor deal
+      // body damage (immunity that still let you ram would be a free weapon)
+      if (!player.dead && player.immunity <= 0) {
         const d = mob.pos.distanceTo(player.pos);
         if (d < mob.radius + player.radius) {
           if (canHit(mob, player.id, t)) {
@@ -78,7 +79,7 @@ export function updateCombat(world, dt) {
     if (mi.dead) continue;
 
     for (const player of players) {
-      if (!player.dead) {
+      if (!player.dead && player.immunity <= 0) { // missiles pass through immune flowers
         hitPoint.set(player.pos.x, 1.1, player.pos.z);
         if (mi.pos.distanceTo(hitPoint) < mi.radius + player.radius) {
           player.damage(mi.dmg);

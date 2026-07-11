@@ -17,6 +17,7 @@ export class Net {
     this.ws = null;
     this.worker = null;
     this.everConnected = false;
+    this.updating = false; // server announced a deploy before going down
     this.connect();
   }
 
@@ -28,12 +29,20 @@ export class Net {
     ws.onopen = () => {
       opened = true;
       this.everConnected = true;
+      // the server we're reaching now is the freshly-deployed one, but this
+      // tab still runs the old bundle — reload to pick up the new client
+      // rather than risk an old-client/new-protocol mismatch
+      if (this.updating) { location.reload(); return; }
       this.onStatus?.('online');
     };
     ws.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg.t === 'state') this.onState(msg);
+      else if (msg.t === 'update') {
+        this.updating = true;
+        this.onStatus?.('updating');
+      }
     };
     ws.onclose = () => {
       this.ws = null;
