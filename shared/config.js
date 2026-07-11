@@ -86,6 +86,9 @@ export const MOB_CAP = 22;
 export const VIEW_RADIUS = 110;
 export const PLAYER_BODY_DAMAGE = 10;
 export const HIT_COOLDOWN = 0.45;    // seconds between damage ticks for a touching pair
+// individual loot: everyone who dealt at least this fraction of a mob's max
+// hp gets their own copy of its drop (visible/lootable only by them)
+export const DROP_DAMAGE_FRAC = 0.2;
 
 // works on anything with mutable x/z (THREE.Vector3 or plain objects)
 export function clampToArena(pos, margin = 0) {

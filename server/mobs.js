@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
-  MOB_TYPES, RARITIES, MOB_CAP, ARENA_HALF, clampToArena, pickRarity, pickDrop,
+  MOB_TYPES, RARITIES, MOB_CAP, ARENA_HALF, DROP_DAMAGE_FRAC,
+  clampToArena, pickRarity, pickDrop,
 } from '../shared/config.js';
 import { uid, damp } from './utils.js';
 
@@ -49,6 +50,7 @@ class Mob {
     this.hitCooldowns = new Map();
     this.deadFlag = false;
     this.lastAttacker = null; // Player credited with the kill for xp
+    this.damageBy = new Map(); // playerId -> total damage dealt, for loot shares
 
     if (this.type === 'hornet') {
       this.pos.y = HORNET.cruiseAlt + this.radius; // spawns already airborne
@@ -62,7 +64,10 @@ class Mob {
   damage(amount, source = null, attacker = null) {
     const dealt = Math.max(1, amount - this.armor);
     this.hp -= dealt;
-    if (attacker) this.lastAttacker = attacker;
+    if (attacker) {
+      this.lastAttacker = attacker;
+      this.damageBy.set(attacker.id, (this.damageBy.get(attacker.id) || 0) + dealt);
+    }
     this.world.events.push({ e: 'flash', k: 'mob', id: this.id });
     this.world.events.push({
       e: 'dmg', a: Math.round(dealt),
@@ -85,7 +90,19 @@ class Mob {
       ? this.lastAttacker : this.world.nearestPlayer(this.pos);
     if (killer) killer.gainXp(this.xp);
     const dropType = pickDrop(this.type);
-    if (dropType) this.world.drops.spawn(dropType, this.rarity, this.pos);
+    if (!dropType) return;
+    // individual loot: one privately-owned copy of the drop for every
+    // still-connected player who dealt enough damage; if the kill was so
+    // spread out that nobody crossed the bar, the top contributor gets it
+    const threshold = this.maxHp * DROP_DAMAGE_FRAC;
+    let owners = [...this.damageBy].filter(([id, dmg]) =>
+      dmg >= threshold && this.world.players.has(id));
+    if (owners.length === 0) {
+      const top = [...this.damageBy].filter(([id]) => this.world.players.has(id))
+        .sort((a, b) => b[1] - a[1])[0];
+      owners = top ? [top] : [];
+    }
+    for (const [id] of owners) this.world.drops.spawn(dropType, this.rarity, this.pos, id);
   }
 
   update(dt) {

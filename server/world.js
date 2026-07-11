@@ -184,8 +184,11 @@ export class World {
         x: r2(proj.pos.x), z: r2(proj.pos.z), yaw: r2(proj.yaw),
       })));
 
-    const dropEntries = tag(this.drops.drops, (d) => ({
-      id: d.id, type: d.type, rarity: d.rarity, x: r2(d.pos.x), z: r2(d.pos.z),
+    // drops are individual loot: the wrapper keeps the owner so each
+    // recipient is only sent their own (the owner never reaches the client)
+    const dropEntries = this.drops.drops.map((d) => ({
+      x: d.pos.x, z: d.pos.z, owner: d.owner,
+      entry: { id: d.id, type: d.type, rarity: d.rarity, x: r2(d.pos.x), z: r2(d.pos.z) },
     }));
 
     // events with a position (damage numbers) are scoped like entities;
@@ -215,7 +218,7 @@ export class World {
         mobs: near(mobEntries, px, pz),
         missiles: near(missileEntries, px, pz),
         pmissiles: near(pmissileEntries, px, pz),
-        drops: near(dropEntries, px, pz),
+        drops: near(dropEntries.filter((d) => d.owner === p.id), px, pz),
         events: [...globalEvents, ...near(posEvents, px, pz), ...p.events],
       };
       // private slice rides along only when it changed (the client caches
@@ -241,7 +244,7 @@ export class World {
         mobs: near(mobEntries, s.x, s.z),
         missiles: near(missileEntries, s.x, s.z),
         pmissiles: near(pmissileEntries, s.x, s.z),
-        drops: near(dropEntries, s.x, s.z),
+        drops: [], // drops are private loot — spectators see none
         events: [...globalEvents, ...near(posEvents, s.x, s.z)],
       });
     }
