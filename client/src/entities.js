@@ -55,15 +55,20 @@ export class EntitySync {
     game.scene.add(this.playerMesh);
     this.playerTarget = new THREE.Vector3(0, PLAYER_RADIUS, 0);
     this.playerFacing = 0;
+    this.hadPlayer = false; // false until the first joined (non-spectator) snapshot
   }
 
   apply(state) {
-    const first = !this.state;
     this.state = state;
 
-    this.playerTarget.set(state.player.x, PLAYER_RADIUS, state.player.z);
-    this.playerFacing = state.player.facing;
-    if (first) this.playerMesh.position.copy(this.playerTarget);
+    // spectator snapshots (name gate) have no own player — the flower mesh
+    // idles hidden until the first joined snapshot, then snaps into place
+    if (state.player) {
+      this.playerTarget.set(state.player.x, PLAYER_RADIUS, state.player.z);
+      this.playerFacing = state.player.facing;
+      if (!this.hadPlayer) this.playerMesh.position.copy(this.playerTarget);
+      this.hadPlayer = true;
+    }
 
     // other players: synced collection just like mobs, keyed by player id
     this.syncCollection(this.players, state.players.filter((p) => p.id !== state.you),
@@ -317,10 +322,10 @@ export class EntitySync {
   // ---- per-frame visuals ----
 
   update(dt) {
-    const playerDead = this.state?.player.dead ?? false;
+    const playerDead = this.state?.player?.dead ?? false;
 
-    // the camera sits inside the flower in first person
-    this.playerMesh.visible = !playerDead && !this.game.fpsMode;
+    // hidden while spectating; the camera sits inside the flower in first person
+    this.playerMesh.visible = !!this.state?.player && !playerDead && !this.game.fpsMode;
     this.playerMesh.position.lerp(this.playerTarget, damp(14, dt));
     const targetQ = new THREE.Quaternion().setFromAxisAngle(UP, this.playerFacing);
     this.playerMesh.quaternion.slerp(targetQ, damp(8, dt));
@@ -409,5 +414,13 @@ export class EntitySync {
     }
   }
 
-  playerPos() { return this.playerMesh.position; }
+  // camera focus: your own flower, or the spectated entity from the name gate
+  playerPos() {
+    const spec = this.state?.you == null ? this.state?.spec : null;
+    if (spec) {
+      const view = spec.k === 'player' ? this.players.get(spec.id) : this.mobs.get(spec.id);
+      if (view) return view.mesh.position;
+    }
+    return this.playerMesh.position;
+  }
 }

@@ -31,7 +31,12 @@ Promise.all([
       // present it as `player`/`petals` for the view/UI layers (xp is
       // private and arrives top-level, only for us)
       const me = state.players.find((p) => p.id === state.you);
-      if (!me) return; // we're not in the world (yet)
+      if (!me) {
+        // not joined yet — spectator snapshot from the name gate: render
+        // the live world (camera follows state.spec), no own flower, no HUD
+        game.entities.apply(state);
+        return;
+      }
       state.player = { ...me, xp: state.xp, xpNext: state.xpNext };
       state.petals = me.petals;
       game.entities.apply(state);
@@ -72,7 +77,7 @@ Promise.all([
     game.fpsMode = !game.fpsMode;
     if (game.fpsMode) {
       // start looking the way the flower is facing
-      const facing = game.entities.state?.player.facing ?? 0;
+      const facing = game.entities.state?.player?.facing ?? 0;
       game.input.look.yaw = facing + Math.PI;
       game.input.look.pitch = 0;
       game.input.lockPointer();
@@ -91,6 +96,7 @@ Promise.all([
 
   let inputAccum = 0;
   function sendInput(dt) {
+    if (!chosenName) return; // still on the name gate — nothing to control
     inputAccum += dt;
     if (inputAccum < INPUT_RATE) return;
     inputAccum = 0;

@@ -35,6 +35,30 @@ export class World {
     this.players.delete(id);
   }
 
+  // Resolve what a not-yet-joined connection watches from the name gate:
+  // keep the current target while it's still valid, otherwise pick a random
+  // living player, falling back to a random mob when no flowers are online.
+  // Returns { k, id, x, z } (k/id null when the world is completely empty).
+  spectateTarget(current) {
+    if (current?.k === 'player') {
+      const p = this.players.get(current.id);
+      if (p && !p.dead) return { k: 'player', id: p.id, x: p.pos.x, z: p.pos.z };
+    } else if (current?.k === 'mob') {
+      const m = this.mobs.mobs.find((m) => m.id === current.id);
+      if (m) return { k: 'mob', id: m.id, x: m.pos.x, z: m.pos.z };
+    }
+    const alive = [...this.players.values()].filter((p) => !p.dead);
+    if (alive.length) {
+      const p = alive[Math.floor(Math.random() * alive.length)];
+      return { k: 'player', id: p.id, x: p.pos.x, z: p.pos.z };
+    }
+    if (this.mobs.mobs.length) {
+      const m = this.mobs.mobs[Math.floor(Math.random() * this.mobs.mobs.length)];
+      return { k: 'mob', id: m.id, x: m.pos.x, z: m.pos.z };
+    }
+    return { k: null, id: null, x: 0, z: 0 };
+  }
+
   // nearest living player to a position, or null if nobody qualifies
   nearestPlayer(pos) {
     let best = null;
@@ -111,7 +135,11 @@ export class World {
   // in the fog and off-camera anyway), plus a private slice — their own
   // inventory, xp, and toasts — which must never be sent to anyone else.
   // Flushes all one-shot events.
-  buildSnapshots() {
+  //
+  // `spectators` is a list of { key, k, id, x, z } views for connections
+  // that haven't joined yet (name gate): each gets a snapshot scoped around
+  // its spectate target, with `you: null` and no private slice.
+  buildSnapshots(spectators = []) {
     const tag = (list, entryOf) => list.map((o) => {
       const pos = o.pos;
       return { x: pos.x, z: pos.z, entry: entryOf(o) };
@@ -191,6 +219,20 @@ export class World {
         xpNext: p.xpForNext(),
         inventory: [...p.inventory.entries()],
         events: [...globalEvents, ...near(posEvents, px, pz), ...p.events],
+      });
+    }
+    for (const s of spectators) {
+      out.set(s.key, {
+        t: 'state',
+        time: r2(this.time),
+        you: null,
+        spec: { k: s.k, id: s.id },
+        players: near(playerEntries, s.x, s.z),
+        mobs: near(mobEntries, s.x, s.z),
+        missiles: near(missileEntries, s.x, s.z),
+        pmissiles: near(pmissileEntries, s.x, s.z),
+        drops: near(dropEntries, s.x, s.z),
+        events: [...globalEvents, ...near(posEvents, s.x, s.z)],
       });
     }
     this.events = [];

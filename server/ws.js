@@ -7,13 +7,19 @@ const TICK_MS = 1000 / 30;
 // dev/preview server in development, or server/index.js standalone). Uses
 // noServer + manual upgrade routing so it coexists with vite's HMR socket.
 //
-// One shared World per process: every connection becomes a Player in it.
+// One shared World per process: every connection becomes a Player in it —
+// but only once it sends `join` from the name gate. Until then it's a
+// spectator: it receives world snapshots centered on a random living player
+// (or a mob when nobody's online) so the start screen shows the live world,
+// without a controllable flower existing for it.
 // A single tick loop advances the world and sends each connection its own
 // per-recipient snapshot (own inventory/toasts stay private).
 export function attachGameServer(httpServer, path = '/ws') {
   const wss = new WebSocketServer({ noServer: true });
   const world = new World();
-  const sockets = new Map(); // playerId -> ws
+  const sockets = new Map();    // playerId -> ws
+  const spectators = new Map(); // ws -> { key, target } for pre-join connections
+  let nextSpecKey = 1;
 
   httpServer.on('upgrade', (req, socket, head) => {
     const { pathname } = new URL(req.url, 'http://localhost');
@@ -28,26 +34,47 @@ export function attachGameServer(httpServer, path = '/ws') {
     // produce a huge physics step
     const dt = Math.min((now - last) / 1000, 0.05);
     last = now;
-    if (world.players.size === 0) return; // empty world idles
+    if (world.players.size === 0 && spectators.size === 0) return; // empty world idles
     world.tick(dt);
-    const snapshots = world.buildSnapshots();
+    const specViews = [];
+    for (const spec of spectators.values()) {
+      spec.target = world.spectateTarget(spec.target);
+      specViews.push({ key: spec.key, ...spec.target });
+    }
+    const snapshots = world.buildSnapshots(specViews);
     for (const [playerId, ws] of sockets) {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(snapshots.get(playerId)));
+    }
+    for (const [ws, spec] of spectators) {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(snapshots.get(spec.key)));
     }
   }, TICK_MS);
 
   wss.on('connection', (ws) => {
-    const player = world.addPlayer();
-    sockets.set(player.id, ws);
+    let player = null; // spawned lazily by `join`, not on connect
+    spectators.set(ws, { key: `spec${nextSpecKey++}`, target: null });
 
     ws.on('message', (data) => {
       let msg;
       try { msg = JSON.parse(data); } catch { return; }
+      if (!player) {
+        // spectators have exactly one valid intent: joining the world
+        if (msg?.t === 'join') {
+          spectators.delete(ws);
+          player = world.addPlayer();
+          sockets.set(player.id, ws);
+          try { world.handle(player.id, msg); } catch (err) { console.error('bad message', err); }
+        }
+        return;
+      }
       try { world.handle(player.id, msg); } catch (err) { console.error('bad message', err); }
     });
     ws.on('close', () => {
-      sockets.delete(player.id);
-      world.removePlayer(player.id);
+      spectators.delete(ws);
+      if (player) {
+        sockets.delete(player.id);
+        world.removePlayer(player.id);
+      }
     });
   });
 
