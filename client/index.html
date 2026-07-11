@@ -37,7 +37,11 @@
     #xpfill { background: linear-gradient(180deg, #ffe763, #efc73c); width: 0%; }
 
     /* controls help */
-    #help { position: absolute; top: 14px; right: 14px; text-align: right; font-size: 13px;
+    #discord { position: absolute; top: 14px; right: 14px; font-size: 14px; color: #fff;
+               background: #5865f2; padding: 6px 14px; border-radius: 999px;
+               text-decoration: none; transition: transform 0.08s; }
+    #discord:hover { transform: scale(1.06); }
+    #help { position: absolute; top: 52px; right: 14px; text-align: right; font-size: 13px;
             line-height: 1.55; opacity: 0.9; pointer-events: none; }
 
     /* loadout */
@@ -159,6 +163,7 @@
       </div>
       <div class="barwrap xp"><div class="bartrack"><div class="barfill" id="xpfill"></div></div></div>
     </div>
+    <a id="discord" class="stroke" href="https://discord.gg/pSkDVSqGkt" target="_blank" rel="noopener">Join the Discord</a>
     <div id="help" class="stroke">
       Move — mouse<br/>
       Attack / Defend — left / right click<br/>
