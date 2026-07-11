@@ -1,4 +1,5 @@
 import { PETAL_TYPES, RARITIES, VIEW_RADIUS } from '../shared/config.js';
+import { censorName } from './censor.js';
 import { Player } from './player.js';
 import { MobManager } from './mobs.js';
 import { DropManager } from './drops.js';
@@ -79,7 +80,7 @@ export class World {
         // display name, sent once by the client; re-sent on reconnect
         if (typeof msg.name !== 'string') return;
         const name = msg.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16);
-        player.name = name || 'Flower';
+        player.name = (name && censorName(name)) || 'Flower';
         break;
       }
       case 'input': {
