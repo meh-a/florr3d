@@ -5,6 +5,13 @@ import { loadSave, writeSave } from './db.js';
 
 const TICK_MS = 1000 / 30;
 const AUTOSAVE_MS = 60_000;
+const HEARTBEAT_MS = 30_000;
+// A connection that stops reading keeps readyState OPEN while every send
+// piles up in ws's in-memory buffer (~300KB/s at our snapshot rate) — left
+// alone, one stalled client OOMs the process in a couple of hours. Past
+// this ceiling we cut the connection instead of buffering; the player
+// couldn't play at that latency anyway, and close() cleanup saves them.
+const MAX_BUFFERED = 1_000_000;
 
 // Attach the game websocket endpoint to an existing http server (the vite
 // dev/preview server in development, or server/index.js standalone). Uses
@@ -54,18 +61,33 @@ export function attachGameServer(httpServer, path = '/ws') {
       specViews.push({ key: spec.key, ...spec.target });
     }
     const snapshots = world.buildSnapshots(specViews);
-    for (const [playerId, ws] of sockets) {
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(snapshots.get(playerId)));
-    }
-    for (const [ws, spec] of spectators) {
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(snapshots.get(spec.key)));
-    }
+    const deliver = (ws, snapshot) => {
+      if (ws.readyState !== ws.OPEN) return;
+      if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; }
+      ws.send(JSON.stringify(snapshot));
+    };
+    for (const [playerId, ws] of sockets) deliver(ws, snapshots.get(playerId));
+    for (const [ws, spec] of spectators) deliver(ws, snapshots.get(spec.key));
   }, TICK_MS);
+
+  // Dead-peer reaper: a connection that vanished without a FIN never fires
+  // 'close' on its own; ping it and cut it if the previous ping went
+  // unanswered. terminate() fires 'close', which runs the normal cleanup
+  // (save, remove player) — so ghosts can't linger as immortal flowers.
+  setInterval(() => {
+    for (const ws of wss.clients) {
+      if (ws.isAlive === false) { ws.terminate(); continue; }
+      ws.isAlive = false;
+      ws.ping();
+    }
+  }, HEARTBEAT_MS);
 
   wss.on('connection', (ws, req) => {
     let player = null; // spawned lazily by `join`, not on connect
     const accountId = sessionFromCookie(req?.headers?.cookie);
     spectators.set(ws, { key: `spec${nextSpecKey++}`, target: null });
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
 
     ws.on('message', (data) => {
       let msg;
