@@ -38,3 +38,16 @@ export function censorName(name) {
   }
   return name;
 }
+
+// Hard name bans — unlike profanity (which just resets the display name),
+// a match here refuses the connection outright (see ws.js): used to kick
+// coordinated bot swarms that self-identify by name. Matched on the same
+// normalized form, so spacing/leet variants ("D M C A   B0T") still catch.
+const NAME_BANS = [
+  'dmcabot',
+];
+
+export function isBannedName(name) {
+  const flat = normalize(name);
+  return NAME_BANS.some((b) => flat.includes(b));
+}

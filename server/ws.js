@@ -1,6 +1,7 @@
 import { WebSocketServer } from 'ws';
 import { DeltaEncoder, decodeCmd } from '../shared/protocol.js';
 import { Governor } from './governor.js';
+import { isBannedName } from './censor.js';
 import { World } from './world.js';
 import { sessionFromCookie } from './auth.js';
 import { loadSave, writeSave } from './db.js';
@@ -218,6 +219,13 @@ export function attachGameServer(httpServer, path = '/ws') {
       if (!player) {
         // spectators have exactly one valid intent: joining the world
         if (msg?.t === 'join') {
+          // hard name ban (bot swarms): refuse the join and log the ip so
+          // it can be firewalled. The connection stays open as a spectator
+          // — no feedback that tells the bot which name tripped the filter.
+          if (typeof msg.name === 'string' && isBannedName(msg.name)) {
+            console.log(`[ban] refused name="${msg.name.slice(0, 24)}" ip=${ip}`);
+            return;
+          }
           // critical load: existing players keep playing, new flowers wait
           // (the client toasts and retries; joins reopen when load drops)
           if (!gov.joinsOpen) {
