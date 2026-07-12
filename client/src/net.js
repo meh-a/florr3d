@@ -8,6 +8,8 @@
 // (attached to the vite server in dev, server/index.js standalone), and if
 // the very first connection attempt fails — e.g. a static deploy like GitHub
 // Pages — it falls back to running the same server sim in a Web Worker.
+import { decodeState } from '../../shared/protocol.js';
+
 const DEDICATED_URL = import.meta.env.VITE_WS_URL;
 
 export class Net {
@@ -24,6 +26,7 @@ export class Net {
   connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(DEDICATED_URL || `${proto}://${location.host}/ws`);
+    ws.binaryType = 'arraybuffer'; // snapshots arrive as binary frames
     this.ws = ws;
     let opened = false;
     ws.onopen = () => {
@@ -36,9 +39,14 @@ export class Net {
       this.onStatus?.('online');
     };
     ws.onmessage = (ev) => {
+      // binary frame = state snapshot; text frames = rare control messages
+      if (ev.data instanceof ArrayBuffer) {
+        try { this.onState(decodeState(ev.data)); } catch (err) { console.error('bad state frame', err); }
+        return;
+      }
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
-      if (msg.t === 'state') this.onState(msg);
+      if (msg.t === 'state') this.onState(msg); // worker/legacy path
       else if (msg.t === 'update') {
         this.updating = true;
         this.onStatus?.('updating');

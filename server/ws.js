@@ -1,4 +1,5 @@
 import { WebSocketServer } from 'ws';
+import { encodeState } from '../shared/protocol.js';
 import { World } from './world.js';
 import { sessionFromCookie } from './auth.js';
 import { loadSave, writeSave } from './db.js';
@@ -40,7 +41,10 @@ export function attachGameServer(httpServer, path = '/ws') {
       serverNoContextTakeover: true,
       clientNoContextTakeover: true,
       zlibDeflateOptions: { level: 1 },
-      threshold: 256, // don't bother compressing tiny frames
+      // binary snapshots are already compact (quantized ints compress
+      // poorly anyway) — only frames well past typical snapshot size are
+      // worth zlib CPU
+      threshold: 8192,
     },
   });
   const world = new World();
@@ -100,7 +104,7 @@ export function attachGameServer(httpServer, path = '/ws') {
     const deliver = (ws, snapshot) => {
       if (ws.readyState !== ws.OPEN) return;
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; }
-      ws.send(JSON.stringify(snapshot));
+      ws.send(encodeState(snapshot)); // binary frame; control messages stay JSON text
     };
     for (const [playerId, ws] of sockets) deliver(ws, snapshots.get(playerId));
     for (const [ws, spec] of spectators) deliver(ws, snapshots.get(spec.key));
