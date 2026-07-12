@@ -8,6 +8,7 @@ import { Arrows } from './arrows.js';
 import { Net } from './net.js';
 import { preloadMobModels } from './mobmodels.js';
 import { makeMinimap } from './minimap.js';
+import { setupMobileControls, joyWorldOffset } from './mobile.js';
 import { MOB_TYPES } from '../../shared/config.js';
 import { initQualityToggle } from './settings.js';
 
@@ -113,20 +114,25 @@ Promise.all([
   }).catch(() => {});
 
   // hotkeys — the view toggle is local, everything else is a server intent
-  game.input.on('f', () => {
+  const touch = matchMedia('(pointer: coarse)').matches;
+  const toggleCamera = () => {
     game.fpsMode = !game.fpsMode;
     if (game.fpsMode) {
       // start looking the way the flower is facing
       const facing = game.entities.state?.player?.facing ?? 0;
       game.input.look.yaw = facing + Math.PI;
       game.input.look.pitch = 0;
-      game.input.lockPointer();
-      game.ui.toast('First person — WASD to move, F to exit');
+      if (!touch) game.input.lockPointer(); // pointer lock is meaningless on touch
+      game.ui.toast(touch
+        ? 'First person — joystick to move, drag to look'
+        : 'First person — WASD to move, F to exit');
     } else {
-      game.input.unlockPointer();
+      if (!touch) game.input.unlockPointer();
       game.ui.toast('Top-down view');
     }
-  });
+  };
+  game.input.on('f', toggleCamera);
+  setupMobileControls(game, toggleCamera);
   game.input.on('v', () => {
     game.ui.toast(game.arrows.toggle() ? 'Player arrows on' : 'Player arrows off');
   });
@@ -143,8 +149,20 @@ Promise.all([
     inputAccum += dt;
     if (inputAccum < INPUT_RATE) return;
     inputAccum = 0;
-    const target = game.input.cursorWorld();
-    const axes = game.input.moveAxes();
+    let target = game.input.cursorWorld();
+    let axes = game.input.moveAxes();
+    const joy = game.input.joy;
+    if (joy) {
+      // touch device: the joystick is the only movement source — released
+      // stick means stand still, not chase the last emulated mouse position
+      if (game.fpsMode) {
+        axes = { x: joy.x, z: -joy.y };
+      } else {
+        const p = game.entities.playerPos();
+        const off = joy.active ? joyWorldOffset(game.camera, joy) : { x: 0, z: 0 };
+        target = { x: p.x + off.x, z: p.z + off.z };
+      }
+    }
     game.net.send({
       t: 'input',
       tx: Math.round(target.x * 100) / 100,

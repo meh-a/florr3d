@@ -6,6 +6,10 @@ import {
 import { uid } from './utils.js';
 import { PetalManager } from './petals.js';
 
+// flower health grows with level: level 1 = 200, +6 per level (level 50
+// ≈ 500) — linear so grinding never makes a flower unkillable
+const maxHpForLevel = (level) => 200 + (level - 1) * 6;
+
 // Authoritative player. Movement is driven by the last input the client
 // sent (cursor target in top-down mode, yaw + move axes in first person);
 // hp/xp/death are decided here and only reported to the client. Each
@@ -27,7 +31,7 @@ export class Player {
     this.xpDirty = true;
     this.pos = new THREE.Vector3(SPAWN_POS.x, 0, SPAWN_POS.z);
     this.radius = 1.1;
-    this.maxHp = 200;
+    this.maxHp = maxHpForLevel(1);
     this.hp = this.maxHp;
     this.speed = 13;
     this.regen = 2; // small passive regen for playability (florr itself has none)
@@ -63,6 +67,8 @@ export class Player {
     const slot = (s) => (s && PETAL_TYPES[s.type] && RARITIES[s.rarity]
       ? { type: s.type, rarity: s.rarity } : null);
     if (Number.isInteger(save.level) && save.level >= 1) this.level = Math.min(save.level, 200);
+    this.maxHp = maxHpForLevel(this.level);
+    this.hp = this.maxHp;
     if (Number.isFinite(save.xp) && save.xp >= 0) this.xp = save.xp;
     if (Array.isArray(save.inventory)) {
       for (const [key, count] of save.inventory) {
@@ -106,6 +112,10 @@ export class Player {
     while (this.xp >= this.xpForNext()) {
       this.xp -= this.xpForNext();
       this.level++;
+      // leveling up grants the new max hp headroom as an instant heal
+      const prev = this.maxHp;
+      this.maxHp = maxHpForLevel(this.level);
+      this.hp += this.maxHp - prev;
       this.toast(`Level ${this.level}!`);
     }
   }

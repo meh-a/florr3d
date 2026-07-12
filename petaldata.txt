@@ -6,7 +6,7 @@ Rice appears as a white petal in the shape of an elongated, thinner jellybean wi
 
 ## GLASS
 
-Glass is a petal in florr.io. It phases through entities and cannot damage the same entity more often than once per second. Glass is dropped by Sandstorms and Soldier Ants.
+Glass is a petal in florr.io. It phases through entities and cannot damage the same entity more often than once per second. Glass is dropped by Sandstorms and Soldier Ants. The faster the player moves, the more damage the glass should do. Nerf the starting stats of the glass from the .csv file, so moving faster is balanced.
 
 As its name implies, Glass is a shard of a glass. While in-game, it can morph into many different shapes: it can be assumed that the game draws 5 different points, then joins them and fills in the outline with a transparent white color. Its petal icon displays one of its various forms: an irregular pentagonal shape
 
