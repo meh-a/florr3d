@@ -73,7 +73,7 @@
       <button class="modebtn" data-mode="wall">Walls</button>
     </div>
     <div class="group" id="toolGroup"></div>
-    <div class="group" id="layerGroup" style="display:none">
+    <div class="group" id="layerGroup">
       <span class="grouplabel">Layer</span>
       <button class="smallbtn" id="layerDown">&#9664;</button>
       <span id="layerLabel" style="min-width:2ch; text-align:center; display:inline-block;">0</span>
@@ -100,6 +100,7 @@
       <div id="hint">
         Left-click: paint / select tile &middot; drag to paint a run<br/>
         Right-drag: rotate camera &middot; Middle-drag: pan &middot; Scroll: zoom<br/>
+        Layer &#9664;&#9654; sets placement height for both Floor and Walls — a floor tile caps a layer, a wall fills it, a slope ramps to the next.<br/>
         Painting a tile resets its spawn rates to the type's current defaults — use Select to tweak an existing tile.
       </div>
     </div>
@@ -142,19 +143,26 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ---------------------------------------------------------------------
-// Terrain tile palette. isWall tiles stack in the Y axis (see state.layer);
-// all other tiles are single-layer floor covering the ground plane.
+// Terrain tile palette. Both floor and wall tiles are placed at a Y layer
+// (see state.layer): a floor tile caps the top of its layer, a wall fills
+// it solid, and a slope (isSlope) ramps from one layer up to the next.
 // Adding a tile type here is enough for it to show up everywhere in this
 // tool (toolbar, defaults, export) — nothing else to touch.
 // ---------------------------------------------------------------------
 const TILE_TYPES = {
-  grass:     { name: 'Grass',      color: '#1ea761', isWall: false },
-  dirt:      { name: 'Dirt',       color: '#8a6b42', isWall: false },
-  water:     { name: 'Water',      color: '#2f8fbf', isWall: false },
-  desert:    { name: 'Desert',     color: '#e0c374', isWall: false },
-  jungle:    { name: 'Jungle',     color: '#0d5c2e', isWall: false },
-  dirtWall:  { name: 'Dirt Wall',  color: '#63482a', isWall: true },
-  stoneWall: { name: 'Stone Wall', color: '#888c92', isWall: true },
+  grass:     { name: 'Grass',        color: '#1ea761', isWall: false },
+  dirt:      { name: 'Dirt',         color: '#8a6b42', isWall: false },
+  water:     { name: 'Water',        color: '#2f8fbf', isWall: false },
+  desert:    { name: 'Desert',       color: '#e0c374', isWall: false },
+  jungle:    { name: 'Jungle',       color: '#0d5c2e', isWall: false },
+  dirtWall:  { name: 'Dirt Wall',    color: '#63482a', isWall: true },
+  stoneWall: { name: 'Stone Wall',   color: '#888c92', isWall: true },
+  // ramps that bridge one floor layer up to the next; rot is the mesh's Y
+  // rotation (radians) that points the canonical +Z-uphill wedge the right way
+  slopePZ:   { name: 'Slope (+Z)',   color: '#c98a4a', isWall: false, isSlope: true, rot: 0 },
+  slopePX:   { name: 'Slope (+X)',   color: '#c98a4a', isWall: false, isSlope: true, rot: Math.PI / 2 },
+  slopeNZ:   { name: 'Slope (-Z)',   color: '#c98a4a', isWall: false, isSlope: true, rot: Math.PI },
+  slopeNX:   { name: 'Slope (-X)',   color: '#c98a4a', isWall: false, isSlope: true, rot: -Math.PI / 2 },
 };
 const FLOOR_TYPES = Object.keys(TILE_TYPES).filter((t) => !TILE_TYPES[t].isWall);
 const WALL_TYPES = Object.keys(TILE_TYPES).filter((t) => TILE_TYPES[t].isWall);
@@ -170,8 +178,8 @@ const state = {
   depth: 20,
   mode: 'floor',     // 'floor' | 'wall'
   tool: 'grass',     // a TILE_TYPES key, or 'select' / 'erase'
-  layer: 0,          // current Y layer for wall placement (can be negative)
-  floor: new Map(),  // "gx,gz" -> { type, spawns: {mobId: weight} }
+  layer: 0,          // current Y layer for placement, shared by floor and walls (can be negative)
+  floor: new Map(),  // "gx,gz,gy" -> { type, spawns: {mobId: weight} }
   walls: new Map(),  // "gx,gz,gy" -> { type, spawns: {mobId: weight} }
   typeDefaults: Object.fromEntries(Object.keys(TILE_TYPES).map((t) => [t, {}])),
   selected: null,    // { kind:'floor', gx, gz } | { kind:'wall', gx, gz, gy }
@@ -239,6 +247,29 @@ function rebuildGridVisuals() {
 // shared geometry/material per tile type — only position/type vary per instance
 const floorGeo = new THREE.BoxGeometry(TILE_SIZE * 0.98, 0.5, TILE_SIZE * 0.98);
 const wallGeo = new THREE.BoxGeometry(TILE_SIZE * 0.98, WALL_HEIGHT * 0.98, TILE_SIZE * 0.98);
+
+// canonical ramp wedge: rises from y=0 (at -Z) to y=WALL_HEIGHT (at +Z);
+// slopePX/NZ/NX are this same geometry rotated 90/180/270 around Y
+function buildSlopeGeometry() {
+  const h = TILE_SIZE * 0.49;
+  const yLow = 0, yHigh = WALL_HEIGHT;
+  const A = [-h, yLow, -h], B = [h, yLow, -h], C = [h, yLow, h], D = [-h, yLow, h];
+  const E = [h, yHigh, h], F = [-h, yHigh, h];
+  const tris = [
+    A, B, C,  A, C, D, // bottom
+    A, F, E,  A, E, B, // sloped top
+    D, C, E,  D, E, F, // back (high edge) wall
+    A, D, F,           // left side
+    B, E, C,           // right side
+  ];
+  const pos = new Float32Array(tris.length * 3);
+  tris.forEach((v, i) => pos.set(v, i * 3));
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+const slopeGeo = buildSlopeGeometry();
 const materials = {};
 for (const [type, def] of Object.entries(TILE_TYPES)) {
   materials[type] = new THREE.MeshLambertMaterial({
@@ -251,13 +282,21 @@ const wallMeshes = new Map();
 
 function cellCenter(gx, gz) { return [(gx + 0.5) * TILE_SIZE, (gz + 0.5) * TILE_SIZE]; }
 
-function setFloorMesh(key, gx, gz, type) {
+function setFloorMesh(key, gx, gz, gy, type) {
   const old = floorMeshes.get(key);
   if (old) { scene.remove(old); floorMeshes.delete(key); }
   const [x, z] = cellCenter(gx, gz);
-  const mesh = new THREE.Mesh(floorGeo, materials[type]);
-  mesh.position.set(x, -0.25, z);
-  mesh.userData = { kind: 'floor', gx, gz };
+  const def = TILE_TYPES[type];
+  const mesh = new THREE.Mesh(def.isSlope ? slopeGeo : floorGeo, materials[type]);
+  if (def.isSlope) {
+    // wedge geometry already spans this layer's full height (0..WALL_HEIGHT locally)
+    mesh.position.set(x, gy * WALL_HEIGHT, z);
+    mesh.rotation.y = def.rot;
+  } else {
+    // thin slab capping the top of its layer (layer 0 = ground level)
+    mesh.position.set(x, gy * WALL_HEIGHT - 0.25, z);
+  }
+  mesh.userData = { kind: 'floor', gx, gz, gy, type };
   scene.add(mesh);
   floorMeshes.set(key, mesh);
 }
@@ -315,50 +354,48 @@ function pointerToCell(clientX, clientY) {
   ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(ndc, camera);
 
-  if (state.mode === 'wall') {
-    const targets = [...floorMeshes.values(), ...wallMeshes.values()];
-    const intersects = raycaster.intersectObjects(targets);
+  const isPlacing = state.tool !== 'select' && state.tool !== 'erase';
+  // slopes have a slanted top face whose normal isn't axis-aligned, which
+  // would confuse the face-adjacency placement shortcut below — exclude
+  // them from placement targets (select/erase can still click them directly)
+  const targets = [...floorMeshes.values(), ...wallMeshes.values()]
+    .filter((m) => !isPlacing || !TILE_TYPES[m.userData.type]?.isSlope);
+  const intersects = raycaster.intersectObjects(targets);
 
-    if (intersects.length > 0) {
-      const hit = intersects[0];
-      const userData = hit.object.userData;
-      if (userData && (userData.kind === 'floor' || userData.kind === 'wall')) {
-        if (state.tool === 'select' || state.tool === 'erase') {
-          return {
-            gx: userData.gx,
-            gz: userData.gz,
-            gy: userData.kind === 'wall' ? userData.gy : undefined
-          };
-        } else {
-          // Placement mode: find cell adjacent to intersected face
-          const gx = userData.gx;
-          const gz = userData.gz;
-          const gy = userData.kind === 'wall' ? userData.gy : -1;
+  if (intersects.length > 0) {
+    const hit = intersects[0];
+    const userData = hit.object.userData;
+    if (userData && (userData.kind === 'floor' || userData.kind === 'wall')) {
+      if (!isPlacing) {
+        if (userData.kind === state.mode) {
+          return { gx: userData.gx, gz: userData.gz, gy: userData.gy };
+        }
+        // hit belongs to the other layer type — fall through to the plane
+      } else {
+        // Placement mode: find the cell adjacent to the intersected face
+        const nx = Math.round(hit.face.normal.x);
+        const ny = Math.round(hit.face.normal.y);
+        const nz = Math.round(hit.face.normal.z);
 
-          const nx = Math.round(hit.face.normal.x);
-          const ny = Math.round(hit.face.normal.y);
-          const nz = Math.round(hit.face.normal.z);
+        const targetGx = userData.gx + nx;
+        const targetGz = userData.gz + nz;
+        const targetGy = Math.max(0, userData.gy + ny);
 
-          const targetGx = gx + nx;
-          const targetGz = gz + nz;
-          const targetGy = Math.max(0, gy + ny);
-
-          if (targetGx >= 0 && targetGz >= 0 && targetGx < state.width && targetGz < state.depth) {
-            return { gx: targetGx, gz: targetGz, gy: targetGy };
-          }
+        if (targetGx >= 0 && targetGz >= 0 && targetGx < state.width && targetGz < state.depth) {
+          return { gx: targetGx, gz: targetGz, gy: targetGy };
         }
       }
     }
   }
 
-  // Fallback: intersect with ground plane at target height
-  const planeY = state.mode === 'floor' ? 0 : state.layer * WALL_HEIGHT + WALL_HEIGHT / 2;
+  // Fallback: intersect the horizontal plane at the current layer's height
+  const planeY = state.layer * WALL_HEIGHT + (state.mode === 'wall' ? WALL_HEIGHT / 2 : 0);
   groundPlane.constant = -planeY;
   if (!raycaster.ray.intersectPlane(groundPlane, hitPoint)) return null;
   const gx = Math.floor(hitPoint.x / TILE_SIZE);
   const gz = Math.floor(hitPoint.z / TILE_SIZE);
   if (gx < 0 || gz < 0 || gx >= state.width || gz >= state.depth) return null;
-  return { gx, gz, gy: state.mode === 'floor' ? undefined : state.layer };
+  return { gx, gz, gy: state.layer };
 }
 
 let lastCell = null;
@@ -369,9 +406,9 @@ function updateCursor(cell) {
   cursor.visible = true;
   const [x, z] = cellCenter(cell.gx, cell.gz);
   cursor.material.color.setHex(toolColor());
-  if (state.mode === 'floor' || cell.gy === undefined) {
+  if (state.mode === 'floor') {
     cursor.scale.set(TILE_SIZE * 0.96, 0.6, TILE_SIZE * 0.96);
-    cursor.position.set(x, 0.3, z);
+    cursor.position.set(x, cell.gy * WALL_HEIGHT + 0.3, z);
   } else {
     cursor.scale.set(TILE_SIZE * 0.96, WALL_HEIGHT * 0.96, TILE_SIZE * 0.96);
     cursor.position.set(x, cell.gy * WALL_HEIGHT + WALL_HEIGHT / 2, z);
@@ -385,7 +422,7 @@ function updateSelectionOutline() {
   selOutline.visible = true;
   if (sel.kind === 'floor') {
     selOutline.scale.set(TILE_SIZE, 0.7, TILE_SIZE);
-    selOutline.position.set(x, -0.2, z);
+    selOutline.position.set(x, sel.gy * WALL_HEIGHT + 0.2, z);
   } else {
     selOutline.scale.set(TILE_SIZE, WALL_HEIGHT, TILE_SIZE);
     selOutline.position.set(x, sel.gy * WALL_HEIGHT + WALL_HEIGHT / 2, z);
@@ -393,19 +430,19 @@ function updateSelectionOutline() {
 }
 
 function applyToolAtCell(gx, gz, gy) {
-  if (state.mode === 'floor' || gy === undefined) {
-    const key = `${gx},${gz}`;
+  if (state.mode === 'floor') {
+    const key = `${gx},${gz},${gy}`;
     if (state.tool === 'erase') {
       state.floor.delete(key);
       removeFloorMesh(key);
-      if (state.selected?.kind === 'floor' && state.selected.gx === gx && state.selected.gz === gz) selectNone();
+      if (state.selected?.kind === 'floor' && state.selected.gx === gx && state.selected.gz === gz && state.selected.gy === gy) selectNone();
       return;
     }
-    if (state.tool === 'select') { selectFloor(gx, gz); return; }
+    if (state.tool === 'select') { selectFloor(gx, gz, gy); return; }
     const type = state.tool;
     state.floor.set(key, { type, spawns: { ...(state.typeDefaults[type] || {}) } });
-    setFloorMesh(key, gx, gz, type);
-    selectFloor(gx, gz);
+    setFloorMesh(key, gx, gz, gy, type);
+    selectFloor(gx, gz, gy);
   } else {
     const key = `${gx},${gz},${gy}`;
     if (state.tool === 'erase') {
@@ -422,9 +459,9 @@ function applyToolAtCell(gx, gz, gy) {
   }
 }
 
-function selectFloor(gx, gz) {
-  const tile = state.floor.get(`${gx},${gz}`);
-  state.selected = tile ? { kind: 'floor', gx, gz } : null;
+function selectFloor(gx, gz, gy) {
+  const tile = state.floor.get(`${gx},${gz},${gy}`);
+  state.selected = tile ? { kind: 'floor', gx, gz, gy } : null;
   updateSelectionOutline();
   renderInspector();
 }
@@ -442,7 +479,7 @@ function selectNone() {
 function selectedTileObj() {
   const sel = state.selected;
   if (!sel) return null;
-  return sel.kind === 'floor' ? state.floor.get(`${sel.gx},${sel.gz}`) : state.walls.get(`${sel.gx},${sel.gz},${sel.gy}`);
+  return sel.kind === 'floor' ? state.floor.get(`${sel.gx},${sel.gz},${sel.gy}`) : state.walls.get(`${sel.gx},${sel.gz},${sel.gy}`);
 }
 
 renderer.domElement.addEventListener('pointerdown', (e) => {
@@ -462,7 +499,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   lastCell = cell;
   updateCursor(cell);
   document.getElementById('status').textContent = cell
-    ? `${state.mode === 'floor' ? 'Floor' : 'Wall layer ' + (cell.gy !== undefined ? cell.gy : state.layer)} · cell (${cell.gx}, ${cell.gz})`
+    ? `${state.mode === 'floor' ? 'Floor' : 'Wall'} layer ${cell.gy} · cell (${cell.gx}, ${cell.gz})`
     : '';
   if (isPainting && cell && (state.tool !== 'select')) {
     applyToolAtCell(cell.gx, cell.gz, cell.gy);
@@ -522,7 +559,6 @@ document.querySelectorAll('.modebtn').forEach((btn) => {
   btn.onclick = () => {
     state.mode = btn.dataset.mode;
     document.querySelectorAll('.modebtn').forEach((b) => b.classList.toggle('active', b === btn));
-    document.getElementById('layerGroup').style.display = state.mode === 'wall' ? 'flex' : 'none';
     state.tool = state.mode === 'floor' ? FLOOR_TYPES[0] : WALL_TYPES[0];
     renderToolbar();
     selectNone();
@@ -663,7 +699,7 @@ function renderInspector() {
   inspector.innerHTML = '';
   const header = document.createElement('div');
   header.style.marginBottom = '8px';
-  header.innerHTML = `<strong>${TILE_TYPES[tile.type].name}</strong><br/><span class="muted">(${sel.gx}, ${sel.gz}${sel.kind === 'wall' ? `, layer ${sel.gy}` : ''})</span>`;
+  header.innerHTML = `<strong>${TILE_TYPES[tile.type].name}</strong><br/><span class="muted">(${sel.gx}, ${sel.gz}, layer ${sel.gy})</span>`;
   inspector.appendChild(header);
 
   if (state.mobs.length === 0) {
@@ -690,13 +726,9 @@ function renderInspector() {
   removeBtn.style.marginTop = '8px';
   removeBtn.textContent = 'Remove tile';
   removeBtn.onclick = () => {
-    if (sel.kind === 'floor') {
-      const key = `${sel.gx},${sel.gz}`;
-      state.floor.delete(key); removeFloorMesh(key);
-    } else {
-      const key = `${sel.gx},${sel.gz},${sel.gy}`;
-      state.walls.delete(key); removeWallMesh(key);
-    }
+    const key = `${sel.gx},${sel.gz},${sel.gy}`;
+    if (sel.kind === 'floor') { state.floor.delete(key); removeFloorMesh(key); }
+    else { state.walls.delete(key); removeWallMesh(key); }
     selectNone();
   };
   inspector.appendChild(removeBtn);
@@ -718,8 +750,8 @@ function buildExport() {
     // omit empty spawns objects — import treats missing spawns as {}, and
     // on a fully painted map they dominate the file size
     floor: [...state.floor.entries()].map(([key, t]) => {
-      const [gx, gz] = key.split(',').map(Number);
-      const tile = { gx, gz, type: t.type };
+      const [gx, gz, gy] = key.split(',').map(Number);
+      const tile = { gx, gz, gy, type: t.type };
       if (Object.keys(t.spawns).length) tile.spawns = t.spawns;
       return tile;
     }),
@@ -759,9 +791,10 @@ function loadFromJson(data) {
 
   for (const t of data.floor || []) {
     if (!TILE_TYPES[t.type] || TILE_TYPES[t.type].isWall) continue;
-    const key = `${t.gx},${t.gz}`;
+    const gy = Number.isInteger(t.gy) ? t.gy : 0; // older exports had no layer — ground level
+    const key = `${t.gx},${t.gz},${gy}`;
     state.floor.set(key, { type: t.type, spawns: { ...(t.spawns || {}) } });
-    setFloorMesh(key, t.gx, t.gz, t.type);
+    setFloorMesh(key, t.gx, t.gz, gy, t.type);
   }
   for (const t of data.walls || []) {
     if (!TILE_TYPES[t.type] || !TILE_TYPES[t.type].isWall) continue;

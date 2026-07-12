@@ -29,15 +29,27 @@ export function normalizeMap(data) {
   const ox = Math.floor(width / 2);
   const oz = Math.floor(depth / 2);
 
-  const tiles = {};
+  // floor tiles can now stack across layers (builder-only elevation) — the
+  // live game's ground is still flat, so each column contributes only its
+  // topmost tile's type
+  const topOfColumn = new Map(); // 'gx,gz' -> { type, gy }
   let skipped = 0;
   for (const t of data.floor || []) {
     const def = TILE_TYPES[t.type];
     if (!def || def.isWall) { skipped++; continue; }
-    if (t.type === 'grass') continue; // grass is the implicit base — not an override
-    (tiles[t.type] ??= []).push(t.gx - ox, t.gz - oz);
+    const key = `${t.gx},${t.gz}`;
+    const gy = Number.isInteger(t.gy) ? t.gy : 0;
+    const top = topOfColumn.get(key);
+    if (!top || gy > top.gy) topOfColumn.set(key, { type: t.type, gy });
   }
   if (skipped) warnings.push(`${skipped} floor tile(s) of unknown type skipped`);
+
+  const tiles = {};
+  for (const [key, top] of topOfColumn) {
+    if (top.type === 'grass') continue; // grass is the implicit base — not an override
+    const [gx, gz] = key.split(',').map(Number);
+    (tiles[top.type] ??= []).push(gx - ox, gz - oz);
+  }
   if (data.wallHeight && data.wallHeight !== WALL_HEIGHT) {
     warnings.push(`map wallHeight ${data.wallHeight} != game WALL_HEIGHT ${WALL_HEIGHT}; using game height`);
   }
