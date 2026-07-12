@@ -65,11 +65,21 @@ Promise.all([
       if ((mode === 'online' || mode === 'local') && chosenName) {
         game.net.send({ t: 'join', name: chosenName });
       }
+      // join refused under critical server load: keep spectating and retry
+      // quietly until a slot opens (load sheds fast once the wave passes)
+      if (mode === 'full' && chosenName) {
+        setTimeout(() => {
+          if (chosenName && game.entities.state?.you == null) {
+            game.net.send({ t: 'join', name: chosenName });
+          }
+        }, 8000);
+      }
       game.ui.toast({
         online: 'Connected',
         offline: 'Connection lost — retrying…',
         local: 'No server found — running locally',
         updating: 'Updating…',
+        full: 'Server is packed right now — you\'re in line, hang tight…',
       }[mode]);
     },
   });

@@ -1,5 +1,6 @@
 import { WebSocketServer } from 'ws';
 import { DeltaEncoder, decodeCmd } from '../shared/protocol.js';
+import { Governor } from './governor.js';
 import { World } from './world.js';
 import { sessionFromCookie } from './auth.js';
 import { loadSave, writeSave } from './db.js';
@@ -101,6 +102,7 @@ export function attachGameServer(httpServer, path = '/ws') {
   }, 60_000);
 
   const encoder = new DeltaEncoder();
+  const gov = new Governor(TICK_MS);
   let last = performance.now();
   let tickNo = 0;
   setInterval(() => {
@@ -114,38 +116,54 @@ export function attachGameServer(httpServer, path = '/ws') {
     const t0 = performance.now();
     world.tick(dt);
     const t1 = performance.now();
-    // spectators (name-gate menu views) get frames at half rate — the
-    // client widens its motion smoothing to match, and menu viewers don't
-    // need one-shot events (some fall on skipped ticks) or 20Hz latency
-    const specTick = ++tickNo % 2 === 0;
-    const specViews = [];
-    if (specTick) {
-      for (const spec of spectators.values()) {
-        spec.target = world.spectateTarget(spec.target);
-        specViews.push({ key: spec.key, ...spec.target });
+    // spectators (name-gate menu views) get frames at reduced rate — the
+    // client adapts its motion smoothing to the measured gap, and menu
+    // viewers don't need one-shot events or 20Hz latency. Under load the
+    // governor stretches both rates further (and pauses joins at level 2).
+    tickNo++;
+    // on a skipped frame nothing is built or sent — events stay queued on
+    // the world/players (buildTick is what flushes them), so nothing one-
+    // shot is lost to rate reduction. specTick only ever coincides with
+    // playerTick (specEvery is a multiple of playerEvery).
+    const playerTick = tickNo % gov.playerEvery === 0;
+    const specTick = tickNo % gov.specEvery === 0;
+    let t2 = t1, t3 = t1;
+    if (playerTick) {
+      const specViews = [];
+      if (specTick) {
+        for (const spec of spectators.values()) {
+          spec.target = world.spectateTarget(spec.target);
+          specViews.push({ key: spec.key, ...spec.target });
+        }
       }
+      const { entities, views } = world.buildTick(specViews);
+      encoder.beginTick(entities);
+      t2 = performance.now();
+      const deliver = (ws, view) => {
+        if (!view || ws.readyState !== ws.OPEN) return;
+        if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; }
+        // per-connection delta cache: what this client already has. Encoding
+        // mutates it, so only encode when we're actually going to send.
+        ws.deltaCache ??= DeltaEncoder.newCache();
+        const frame = encoder.encodeFor(ws.deltaCache, view, gov.playerCap);
+        perf.bytes += frame.length;
+        ws.send(frame); // binary frame; control messages stay JSON text
+      };
+      for (const [playerId, ws] of sockets) deliver(ws, views.get(playerId));
+      if (specTick) for (const [ws, spec] of spectators) deliver(ws, views.get(spec.key));
+      t3 = performance.now();
     }
-    const { entities, views } = world.buildTick(specViews);
-    encoder.beginTick(entities);
-    const t2 = performance.now();
-    const deliver = (ws, view) => {
-      if (!view || ws.readyState !== ws.OPEN) return;
-      if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; }
-      // per-connection delta cache: what this client already has. Encoding
-      // mutates it, so only encode when we're actually going to send.
-      ws.deltaCache ??= DeltaEncoder.newCache();
-      const frame = encoder.encodeFor(ws.deltaCache, view);
-      perf.bytes += frame.length;
-      ws.send(frame); // binary frame; control messages stay JSON text
-    };
-    for (const [playerId, ws] of sockets) deliver(ws, views.get(playerId));
-    if (specTick) for (const [ws, spec] of spectators) deliver(ws, views.get(spec.key));
-    const t3 = performance.now();
     perf.n++;
     perf.sim += t1 - t0;
     perf.build += t2 - t1;
     perf.send += t3 - t2;
     perf.max = Math.max(perf.max, t3 - t0);
+    // the governor judges full frames only — skipped frames are cheap by
+    // construction and would mask sustained overload
+    if (playerTick && gov.record(t3 - t0, now)) {
+      console.log(`[load] level ${gov.level} at avg=${gov.avg.toFixed(1)}ms ` +
+        `(players=${world.players.size}) — rate 1/${gov.playerEvery}, cap ${gov.playerCap}, joins ${gov.joinsOpen ? 'open' : 'PAUSED'}`);
+    }
   }, TICK_MS);
 
   // Dead-peer reaper: a connection that vanished without a FIN never fires
@@ -200,6 +218,12 @@ export function attachGameServer(httpServer, path = '/ws') {
       if (!player) {
         // spectators have exactly one valid intent: joining the world
         if (msg?.t === 'join') {
+          // critical load: existing players keep playing, new flowers wait
+          // (the client toasts and retries; joins reopen when load drops)
+          if (!gov.joinsOpen) {
+            ws.send(JSON.stringify({ t: 'full' }));
+            return;
+          }
           spectators.delete(ws);
           player = world.addPlayer();
           sockets.set(player.id, ws);

@@ -423,7 +423,7 @@ export class DeltaEncoder {
     w.patch16(upsertAt, upserts);
   }
 
-  encodeFor(cache, view) {
+  encodeFor(cache, view, playerCap = 30) {
     // view: { px, pz, you | spec, time, xp?, xpNext?, inventory?, others?, events }
     const w = new Writer();
     w.u8(PROTOCOL_VERSION);
@@ -453,7 +453,7 @@ export class DeltaEncoder {
         cache.players.set(e.id, { stat: e.stat, dyn: e.dyn });
       },
       (sent, e) => !sent || sent.stat !== e.stat || sent.dyn !== e.dyn,
-      30);
+      playerCap);
     const whole = (kindCache) => [
       (wr, e) => { wr.bytes(e.bytes); kindCache.set(e.id, e.bytes); },
       (sent, e) => sent !== e.bytes,

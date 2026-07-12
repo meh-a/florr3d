@@ -54,6 +54,8 @@ export class Net {
       else if (msg.t === 'update') {
         this.updating = true;
         this.onStatus?.('updating');
+      } else if (msg.t === 'full') {
+        this.onStatus?.('full'); // join refused under critical load
       }
     };
     ws.onclose = () => {

@@ -88,6 +88,15 @@ export class EntitySync {
   }
 
   apply(state) {
+    // measured gap between snapshots (EMA): the server stretches frame
+    // rate for spectators and under overload, and motion smoothing widens
+    // to match (see update) — no mode flags needed on the client
+    const now = performance.now();
+    if (this.lastApply !== undefined) {
+      this.snapGap = (this.snapGap ?? 50) * 0.8 + Math.min(now - this.lastApply, 400) * 0.2;
+    }
+    this.lastApply = now;
+
     this.state = state;
 
     // spectator snapshots (name gate) have no own player — the flower mesh
@@ -354,9 +363,10 @@ export class EntitySync {
 
   update(dt) {
     const playerDead = this.state?.player?.dead ?? false;
-    // spectator (name-gate) snapshots arrive at half rate, so soften every
-    // motion lerp to bridge the wider gaps — same visual speed, no stepping
-    const sm = this.state?.you == null ? 0.55 : 1;
+    // soften every motion lerp in proportion to the measured snapshot gap
+    // (50ms nominal): wider gaps — spectating, or the server shedding load
+    // — get gentler smoothing that bridges them instead of stepping
+    const sm = Math.min(1, Math.max(0.3, 55 / (this.snapGap ?? 50)));
 
     // hidden while spectating; the camera sits inside the flower in first person
     this.playerMesh.visible = !!this.state?.player && !playerDead && !this.game.fpsMode;
