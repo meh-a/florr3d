@@ -390,13 +390,23 @@ export class DeltaEncoder {
   }
 
   // one section: removals (cached ids no longer visible) + upserts
-  // (visible entities whose bytes this connection hasn't sent yet)
-  _section(w, entities, cache, px, pz, writeUpsert, changed) {
-    const visible = new Map();
+  // (visible entities whose bytes this connection hasn't sent yet).
+  // `limit` keeps only the nearest N when a crowd packs the view radius —
+  // without it a spawn cluster of P players costs every client P records,
+  // i.e. P^2 total (this melted the server at 145 concurrent players)
+  _section(w, entities, cache, px, pz, writeUpsert, changed, limit = 0) {
+    let inView = [];
     for (const e of entities) {
       const dx = e.x - px, dz = e.z - pz;
-      if (dx * dx + dz * dz <= VIEW_R2) visible.set(e.id, e);
+      const d2 = dx * dx + dz * dz;
+      if (d2 <= VIEW_R2) inView.push({ e, d2 });
     }
+    if (limit && inView.length > limit) {
+      inView.sort((a, b) => a.d2 - b.d2);
+      inView.length = limit;
+    }
+    const visible = new Map();
+    for (const { e } of inView) visible.set(e.id, e);
     const removeAt = w.mark16();
     let removed = 0;
     for (const id of cache.keys()) {
@@ -431,6 +441,8 @@ export class DeltaEncoder {
     }
 
     const { px, pz } = view;
+    // nearest-30 player cap; your own flower is at distance 0, so it can
+    // never be culled by the cap
     this._section(w, this.tick.players, cache.players, px, pz,
       (wr, e, sent) => {
         const needStat = !sent || sent.stat !== e.stat;
@@ -440,7 +452,8 @@ export class DeltaEncoder {
         wr.bytes(e.dyn);
         cache.players.set(e.id, { stat: e.stat, dyn: e.dyn });
       },
-      (sent, e) => !sent || sent.stat !== e.stat || sent.dyn !== e.dyn);
+      (sent, e) => !sent || sent.stat !== e.stat || sent.dyn !== e.dyn,
+      30);
     const whole = (kindCache) => [
       (wr, e) => { wr.bytes(e.bytes); kindCache.set(e.id, e.bytes); },
       (sent, e) => sent !== e.bytes,

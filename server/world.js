@@ -163,9 +163,13 @@ export class World {
         .sort((a, b) => a.d - b.d)
         .slice(0, 3)
         .map(({ o }) => ({ name: o.name, x: r2c(o.pos.x), z: r2c(o.pos.z) }));
+      // private events (toasts) first — they must survive the cap; the
+      // rest are cosmetic (flashes, damage numbers) and a crowd fight can
+      // generate hundreds per tick, which multiplied across every nearby
+      // client during the 145-player wave
       const view = {
         px, pz, you: p.id, time: r2c(this.time), others,
-        events: [...globalEvents, ...nearEvents(px, pz), ...p.events],
+        events: [...p.events, ...globalEvents, ...nearEvents(px, pz)].slice(0, 80),
       };
       if (p.xpDirty) {
         view.xp = Math.floor(p.xp);
@@ -182,7 +186,7 @@ export class World {
       views.set(s.key, {
         px: s.x, pz: s.z, you: null, spec: { k: s.k, id: s.id },
         time: r2c(this.time),
-        events: [...globalEvents, ...nearEvents(s.x, s.z)],
+        events: [...globalEvents, ...nearEvents(s.x, s.z)].slice(0, 80),
       });
     }
     this.events = [];
