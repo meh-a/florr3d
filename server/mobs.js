@@ -1,8 +1,15 @@
 import * as THREE from 'three';
 import {
-  MOB_TYPES, RARITIES, MOB_CAP, ARENA_HALF, DROP_DAMAGE_FRAC,
-  clampToArena, pickRarity, pickDrop,
+  MOB_TYPES, RARITIES, MOB_CAP, ARENA_HALF, TILE_SIZE, SPAWN_POS,
+  DROP_DAMAGE_FRAC, MIN_LOOTERS, EQUAL_RARITY_DROP_BASE,
+  clampToArena, collideWalls, isWallCell, wallTopAt,
+  tileTypeAt, pickRarity, pickDrop,
 } from '../shared/config.js';
+
+// spawns this close to the player spawn point never exceed Rare, whatever
+// the depth roll says — fresh flowers shouldn't meet an Ultra on tile one
+const SAFE_RING = 60;
+const SAFE_RING_MAX_RARITY = 2;
 import { uid, damp } from './utils.js';
 
 // Hornet flight tuning. The attack rhythm is: hover out of reach and lob
@@ -91,20 +98,27 @@ class Mob {
     if (killer) killer.gainXp(this.xp);
     const dropType = pickDrop(this.type);
     if (!dropType) return;
-    // individual loot: one privately-owned copy of the drop for everyone who
-    // contributed at least DROP_DAMAGE_FRAC of the damage recorded from
-    // still-connected players. Shares are relative to actual damage dealt —
-    // not max hp — so heavily-armored mobs (where every hit lands as 1) and
-    // credit orphaned by disconnects can't push the bar out of reach. If the
-    // kill was still too spread out, the top contributor gets it.
-    const connected = [...this.damageBy].filter(([id]) => this.world.players.has(id));
+    // individual loot: one privately-owned copy of the drop for each of the
+    // top MIN_LOOTERS damage contributors, no matter how small their share —
+    // past those, a contributor still qualifies with at least
+    // DROP_DAMAGE_FRAC of the damage recorded from still-connected players.
+    // Shares are relative to actual damage dealt — not max hp — so
+    // heavily-armored mobs (where every hit lands as 1) and credit orphaned
+    // by disconnects can't push the bar out of reach.
+    const connected = [...this.damageBy]
+      .filter(([id]) => this.world.players.has(id))
+      .sort((a, b) => b[1] - a[1]);
     if (connected.length === 0) return;
     const total = connected.reduce((sum, [, dmg]) => sum + dmg, 0);
-    let owners = connected.filter(([, dmg]) => dmg >= total * DROP_DAMAGE_FRAC);
-    if (owners.length === 0) {
-      owners = [connected.sort((a, b) => b[1] - a[1])[0]];
+    const owners = connected.filter(([, dmg], rank) =>
+      rank < MIN_LOOTERS || dmg >= total * DROP_DAMAGE_FRAC);
+    // each copy rolls its own rarity: equal to the mob's at a chance that
+    // halves per tier (see EQUAL_RARITY_DROP_BASE), one tier below otherwise
+    for (const [id] of owners) {
+      const equal = Math.random() < EQUAL_RARITY_DROP_BASE / 2 ** this.rarity;
+      const rarity = equal ? this.rarity : Math.max(0, this.rarity - 1);
+      this.world.drops.spawn(dropType, rarity, this.pos, id);
     }
-    for (const [id] of owners) this.world.drops.spawn(dropType, this.rarity, this.pos, id);
   }
 
   update(dt) {
@@ -114,6 +128,9 @@ class Mob {
     this.pos.addScaledVector(this.knock, dt);
     this.knock.multiplyScalar(Math.exp(-6 * dt));
     clampToArena(this.pos, this.radius);
+    // fliers ignore walls (they're above all but the tallest columns; AI
+    // pathing around terrain isn't worth it for a hover-and-dive mob)
+    if (!this.flight) collideWalls(this.pos, this.radius);
   }
 
   updateGround(dt) {
@@ -254,16 +271,21 @@ export class MobManager {
     this.mobs = [];
     this.missiles = [];
     this.spawnTimer = 0;
-    for (let i = 0; i < 32; i++) this.trySpawn(true);
+    const initial = Math.floor(MOB_CAP * 0.8);
+    for (let i = 0; i < initial; i++) this.trySpawn();
   }
 
   // weighted type pick: types without a spawnWeight count as 1; types at
-  // their maxAlive cap are excluded from the roll entirely
+  // their maxAlive cap are excluded from the roll entirely. maxAlive values
+  // are tuned for the default 56-mob arena and scale with the actual cap,
+  // so a big map keeps the same population share (never below the tuned
+  // number on small arenas).
   pickType() {
     const alive = {};
     for (const m of this.mobs) alive[m.type] = (alive[m.type] || 0) + 1;
+    const capOf = (def) => Math.max(def.maxAlive, Math.round(def.maxAlive * MOB_CAP / 56));
     const entries = Object.entries(MOB_TYPES)
-      .filter(([type, def]) => !def.maxAlive || (alive[type] || 0) < def.maxAlive);
+      .filter(([type, def]) => !def.maxAlive || (alive[type] || 0) < capOf(def));
     let total = 0;
     for (const [, def] of entries) total += def.spawnWeight ?? 1;
     let r = Math.random() * total;
@@ -274,24 +296,30 @@ export class MobManager {
     return entries[0][0];
   }
 
-  trySpawn(initial = false) {
+  trySpawn() {
     if (this.mobs.length >= MOB_CAP) return;
     const players = [...this.world.players.values()];
-    // mostly keep the action near players, but let a quarter of spawns land
-    // anywhere so the far reaches of the map stay populated after the
-    // initial fill (kills only ever happen near players, so player-scoped
-    // respawns alone would slowly drain everywhere else)
-    const anywhere = initial || players.length === 0 || Math.random() < 0.25;
-    for (let attempt = 0; attempt < 12; attempt++) {
+    // spawns are uniform across the whole map — the world exists on its
+    // own terms; zones stay populated whether anyone is nearby or not
+    for (let attempt = 0; attempt < 20; attempt++) {
       const pos = new THREE.Vector3(
         (Math.random() * 2 - 1) * (ARENA_HALF - 8), 0,
         (Math.random() * 2 - 1) * (ARENA_HALF - 8)
       );
-      // never pop in on top of anyone
-      const dists = players.map((p) => pos.distanceTo(p.pos));
-      if (dists.some((d) => d < 30)) continue;
-      if (!anywhere && !dists.some((d) => d <= 130)) continue;
-      this.mobs.push(new Mob(this.world, this.pickType(), pickRarity(), pos));
+      // grass only (mobs don't spawn in water/desert/jungle — per-tile mob
+      // pools come later with the builder's spawn rates), never inside a
+      // wall column, never popping in on top of anyone
+      if (tileTypeAt(pos.x, pos.z) !== 'grass') continue;
+      if (isWallCell(Math.round(pos.x / TILE_SIZE), Math.round(pos.z / TILE_SIZE))) continue;
+      if (players.some((p) => pos.distanceTo(p.pos) < 30)) continue;
+      // rarity scales with depth: distance from the spawn point relative to
+      // the farthest reach of the arena, so the gradient spans the whole
+      // map wherever the spawn sits (corner spawn = diagonal gradient)
+      const dist = Math.hypot(pos.x - SPAWN_POS.x, pos.z - SPAWN_POS.z);
+      const maxDist = Math.hypot(ARENA_HALF + Math.abs(SPAWN_POS.x), ARENA_HALF + Math.abs(SPAWN_POS.z));
+      let rarity = pickRarity(Math.random, Math.min(1, dist / maxDist));
+      if (dist < SAFE_RING) rarity = Math.min(rarity, SAFE_RING_MAX_RARITY);
+      this.mobs.push(new Mob(this.world, this.pickType(), rarity, pos));
       return;
     }
   }
@@ -329,17 +357,40 @@ export class MobManager {
 
     for (const mob of this.mobs) mob.update(dt);
 
-    // gentle mob-mob separation so they don't stack
+    // Gentle mob-mob separation so they don't stack. Broad phase is a
+    // uniform hash grid rebuilt per tick: cells are wider than the largest
+    // possible pair reach (two Ultra-scale radii), so only the 3x3
+    // neighborhood can contain overlapping pairs — O(n) instead of the old
+    // all-pairs O(n^2), which matters once big maps raise the mob cap.
+    const CELL = 24;
+    const grid = new Map(); // 'cx,cz' -> indices into this.mobs
+    const keys = new Array(this.mobs.length);
     for (let i = 0; i < this.mobs.length; i++) {
-      for (let j = i + 1; j < this.mobs.length; j++) {
-        const a = this.mobs[i], b = this.mobs[j];
-        const d = a.pos.distanceTo(b.pos);
-        const min = a.radius + b.radius;
-        if (d < min && d > 0.001) {
-          const push = b.pos.clone().sub(a.pos).setY(0).normalize()
-            .multiplyScalar((min - d) * 0.5);
-          if (a.speed > 0) a.pos.sub(push);
-          if (b.speed > 0) b.pos.add(push);
+      const m = this.mobs[i];
+      const key = Math.floor(m.pos.x / CELL) + ',' + Math.floor(m.pos.z / CELL);
+      keys[i] = key;
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(i);
+    }
+    for (let i = 0; i < this.mobs.length; i++) {
+      const a = this.mobs[i];
+      const [cx, cz] = keys[i].split(',').map(Number);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const bucket = grid.get((cx + dx) + ',' + (cz + dz));
+          if (!bucket) continue;
+          for (const j of bucket) {
+            if (j <= i) continue; // each pair once
+            const b = this.mobs[j];
+            const d = a.pos.distanceTo(b.pos);
+            const min = a.radius + b.radius;
+            if (d < min && d > 0.001) {
+              const push = b.pos.clone().sub(a.pos).setY(0).normalize()
+                .multiplyScalar((min - d) * 0.5);
+              if (a.speed > 0) a.pos.sub(push);
+              if (b.speed > 0) b.pos.add(push);
+            }
+          }
         }
       }
     }
@@ -350,6 +401,7 @@ export class MobManager {
       mi.pos.addScaledVector(mi.vel, dt);
       mi.life -= dt;
       if (mi.life <= 0 || mi.pos.y <= 0.05 ||
+          mi.pos.y < wallTopAt(mi.pos.x, mi.pos.z) || // splats on terrain
           Math.max(Math.abs(mi.pos.x), Math.abs(mi.pos.z)) > ARENA_HALF + 4) {
         mi.dead = true;
       }

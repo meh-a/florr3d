@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import { PETAL_TYPES, RARITIES, SPAWN_IMMUNITY, clampToArena } from '../shared/config.js';
+import {
+  PETAL_TYPES, RARITIES, TILE_TYPES, SPAWN_IMMUNITY, SPAWN_POS,
+  clampToArena, collideWalls, tileTypeAt,
+} from '../shared/config.js';
 import { uid } from './utils.js';
 import { PetalManager } from './petals.js';
 
@@ -22,7 +25,7 @@ export class Player {
     // first snapshot always carries the full slice.
     this.invDirty = true;
     this.xpDirty = true;
-    this.pos = new THREE.Vector3(0, 0, 0);
+    this.pos = new THREE.Vector3(SPAWN_POS.x, 0, SPAWN_POS.z);
     this.radius = 1.1;
     this.maxHp = 200;
     this.hp = this.maxHp;
@@ -36,6 +39,7 @@ export class Player {
     this.hitCooldowns = new Map();
     this.knock = new THREE.Vector3();
     this.facing = 0;
+    this.zoneToasts = new Set(); // biomes already announced this session
     this.petals = new PetalManager(world, this);
   }
 
@@ -129,7 +133,7 @@ export class Player {
       if (this.deadTimer <= 0) {
         this.dead = false;
         this.hp = this.maxHp;
-        this.pos.set(0, 0, 0);
+        this.pos.set(SPAWN_POS.x, 0, SPAWN_POS.z);
         this.knock.set(0, 0, 0);
         this.immunity = SPAWN_IMMUNITY;
       }
@@ -171,5 +175,14 @@ export class Player {
     this.pos.addScaledVector(this.knock, dt);
     this.knock.multiplyScalar(Math.exp(-6 * dt));
     clampToArena(this.pos, this.radius);
+    collideWalls(this.pos, this.radius);
+
+    // stepping into a biome that has no mob pool yet gets a heads-up,
+    // once per biome per session (water is scenery, not a future zone)
+    const tile = tileTypeAt(this.pos.x, this.pos.z);
+    if (tile !== 'grass' && tile !== 'water' && !this.zoneToasts.has(tile)) {
+      this.zoneToasts.add(tile);
+      this.toast(`${TILE_TYPES[tile]?.name ?? tile} mobs aren't ready yet, coming soon!`);
+    }
   }
 }

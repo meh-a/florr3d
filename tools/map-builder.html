@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>florr3d Map Builder</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0e1712;
+               font-family: 'Segoe UI', Ubuntu, sans-serif; color: #eaf5ea; }
+  button { font-family: inherit; cursor: pointer; }
+
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ---- top bar ---- */
+  #topbar { flex: 0 0 auto; background: #16241c; border-bottom: 2px solid #0a120d;
+            padding: 8px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+  .group { display: flex; align-items: center; gap: 6px; }
+  .group + .group { border-left: 1px solid #2a3d30; padding-left: 14px; }
+  .grouplabel { font-size: 11px; text-transform: uppercase; opacity: 0.6; letter-spacing: 0.04em; margin-right: 2px; }
+
+  .toolbtn { background: #24382b; border: 2px solid #33503e; border-radius: 6px;
+             padding: 5px 10px; color: #eaf5ea; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .toolbtn:hover { border-color: #4c7a5d; }
+  .toolbtn.active { border-color: #ffe763; background: #3a4a2e; }
+  .toolbtn .swatch { width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.4); }
+
+  .modebtn { background: #1b2b21; border: 2px solid #2a3d30; border-radius: 999px; padding: 5px 14px; color: #cfe; font-size: 13px; }
+  .modebtn.active { background: #3a4a2e; border-color: #78dd39; color: #fff; }
+
+  .smallbtn { background: #24382b; border: 1px solid #33503e; border-radius: 5px; color: #eaf5ea;
+              padding: 4px 9px; font-size: 12px; }
+  .smallbtn:hover { border-color: #4c7a5d; }
+  .smallbtn.danger:hover { border-color: #c22a1e; }
+
+  input[type=number] { width: 54px; background: #0e1712; border: 1px solid #33503e; border-radius: 4px;
+                       color: #eaf5ea; padding: 3px 5px; font-size: 12px; }
+  input[type=text] { background: #0e1712; border: 1px solid #33503e; border-radius: 4px;
+                     color: #eaf5ea; padding: 3px 6px; font-size: 12px; }
+  input[type=color] { width: 26px; height: 24px; border: 1px solid #33503e; border-radius: 4px; background: none; padding: 0; }
+
+  /* ---- main area ---- */
+  #main { flex: 1; display: flex; min-height: 0; }
+  #viewport { flex: 1; position: relative; }
+  #viewport canvas { display: block; }
+  #status { position: absolute; left: 10px; bottom: 10px; background: rgba(10,18,13,0.75);
+            padding: 6px 12px; border-radius: 6px; font-size: 12px; line-height: 1.5; pointer-events: none; }
+  #hint { position: absolute; right: 10px; bottom: 10px; background: rgba(10,18,13,0.75);
+          padding: 6px 12px; border-radius: 6px; font-size: 11px; line-height: 1.6; text-align: right; opacity: 0.85; pointer-events: none; }
+
+  #sidebar { width: 300px; flex: 0 0 auto; background: #131f18; border-left: 2px solid #0a120d;
+             overflow-y: auto; padding: 12px; }
+  .panel { background: #182619; border: 1px solid #263a2b; border-radius: 8px; padding: 10px; margin-bottom: 12px; }
+  .panel h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.75; margin-bottom: 8px; }
+  .mobrow { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .mobrow input[type=text] { flex: 1; min-width: 0; }
+  .weightrow { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 12px; }
+  .weightrow .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+  .weightrow .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .weightrow input[type=number] { width: 60px; }
+  .muted { opacity: 0.55; font-size: 12px; }
+  .addmob { display: flex; gap: 6px; margin-top: 6px; }
+  select { background: #0e1712; border: 1px solid #33503e; border-radius: 4px; color: #eaf5ea;
+           padding: 4px 6px; font-size: 12px; width: 100%; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div class="group">
+      <span class="grouplabel">Mode</span>
+      <button class="modebtn" data-mode="floor">Floor</button>
+      <button class="modebtn" data-mode="wall">Walls</button>
+    </div>
+    <div class="group" id="toolGroup"></div>
+    <div class="group" id="layerGroup" style="display:none">
+      <span class="grouplabel">Layer</span>
+      <button class="smallbtn" id="layerDown">&#9664;</button>
+      <span id="layerLabel" style="min-width:2ch; text-align:center; display:inline-block;">0</span>
+      <button class="smallbtn" id="layerUp">&#9654;</button>
+    </div>
+    <div class="group">
+      <span class="grouplabel">Grid</span>
+      <input type="number" id="gridW" min="2" max="120" />
+      <span>&times;</span>
+      <input type="number" id="gridD" min="2" max="120" />
+      <button class="smallbtn" id="resizeBtn">Resize</button>
+    </div>
+    <div class="group">
+      <button class="smallbtn danger" id="clearBtn">Clear map</button>
+      <button class="smallbtn" id="importBtn">Import</button>
+      <input type="file" id="importFile" accept="application/json" style="display:none" />
+      <button class="smallbtn" id="exportBtn">Export map.json</button>
+    </div>
+  </div>
+
+  <div id="main">
+    <div id="viewport">
+      <div id="status"></div>
+      <div id="hint">
+        Left-click: paint / select tile &middot; drag to paint a run<br/>
+        Right-drag: rotate camera &middot; Middle-drag: pan &middot; Scroll: zoom<br/>
+        Painting a tile resets its spawn rates to the type's current defaults — use Select to tweak an existing tile.
+      </div>
+    </div>
+    <div id="sidebar">
+      <div class="panel">
+        <h3>Mobs</h3>
+        <div id="mobList"></div>
+        <div class="addmob">
+          <input type="color" id="newMobColor" value="#66ccff" />
+          <input type="text" id="newMobName" placeholder="New mob name" />
+          <button class="smallbtn" id="addMobBtn">+ Add</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Default spawn rates</h3>
+        <select id="defaultsType"></select>
+        <div id="defaultsList"></div>
+        <button class="smallbtn" id="applyDefaultsBtn">Apply to all existing tiles of this type</button>
+      </div>
+
+      <div class="panel">
+        <h3>Selected tile</h3>
+        <div id="inspector"><p class="muted">Nothing selected. Use the Select tool, or place a tile.</p></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.166.1/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.166.1/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------------------------------------------------------------------
+// Terrain tile palette. isWall tiles stack in the Y axis (see state.layer);
+// all other tiles are single-layer floor covering the ground plane.
+// Adding a tile type here is enough for it to show up everywhere in this
+// tool (toolbar, defaults, export) — nothing else to touch.
+// ---------------------------------------------------------------------
+const TILE_TYPES = {
+  grass:     { name: 'Grass',      color: '#1ea761', isWall: false },
+  dirt:      { name: 'Dirt',       color: '#8a6b42', isWall: false },
+  water:     { name: 'Water',      color: '#2f8fbf', isWall: false },
+  desert:    { name: 'Desert',     color: '#e0c374', isWall: false },
+  jungle:    { name: 'Jungle',     color: '#0d5c2e', isWall: false },
+  dirtWall:  { name: 'Dirt Wall',  color: '#63482a', isWall: true },
+  stoneWall: { name: 'Stone Wall', color: '#888c92', isWall: true },
+};
+const FLOOR_TYPES = Object.keys(TILE_TYPES).filter((t) => !TILE_TYPES[t].isWall);
+const WALL_TYPES = Object.keys(TILE_TYPES).filter((t) => TILE_TYPES[t].isWall);
+
+const TILE_SIZE = 20;   // world units per cell; matches the live game's shared/config.js
+const WALL_HEIGHT = 4;  // world units per wall layer
+
+// ---------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------
+const state = {
+  width: 20,
+  depth: 20,
+  mode: 'floor',     // 'floor' | 'wall'
+  tool: 'grass',     // a TILE_TYPES key, or 'select' / 'erase'
+  layer: 0,          // current Y layer for wall placement (can be negative)
+  floor: new Map(),  // "gx,gz" -> { type, spawns: {mobId: weight} }
+  walls: new Map(),  // "gx,gz,gy" -> { type, spawns: {mobId: weight} }
+  typeDefaults: Object.fromEntries(Object.keys(TILE_TYPES).map((t) => [t, {}])),
+  selected: null,    // { kind:'floor', gx, gz } | { kind:'wall', gx, gz, gy }
+  mobs: [
+    { id: 'rock', name: 'Rock', color: '#8a8a90' },
+    { id: 'ladybug', name: 'Ladybug', color: '#d1291b' },
+    { id: 'bee', name: 'Bee', color: '#ffe763' },
+  ],
+};
+let mobSeq = 0;
+let defaultsPanelType = 'grass';
+
+// ---------------------------------------------------------------------
+// Three.js scene
+// ---------------------------------------------------------------------
+const viewport = document.getElementById('viewport');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#1a2a20');
+
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 3000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+viewport.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445533, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+sun.position.set(40, 80, 30);
+scene.add(sun);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+let gridLines = null;
+let voidPlane = null;
+function rebuildGridVisuals() {
+  if (gridLines) { scene.remove(gridLines); gridLines.geometry.dispose(); gridLines.material.dispose(); }
+  if (voidPlane) { scene.remove(voidPlane); voidPlane.geometry.dispose(); voidPlane.material.dispose(); }
+
+  const w = state.width * TILE_SIZE, d = state.depth * TILE_SIZE;
+  const pts = [];
+  for (let i = 0; i <= state.width; i++) { const x = i * TILE_SIZE; pts.push(x, 0.02, 0, x, 0.02, d); }
+  for (let j = 0; j <= state.depth; j++) { const z = j * TILE_SIZE; pts.push(0, 0.02, z, w, 0.02, z); }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  gridLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x5fae7a, transparent: true, opacity: 0.55 }));
+  scene.add(gridLines);
+
+  const margin = 60;
+  voidPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(w + margin * 2, d + margin * 2),
+    new THREE.MeshBasicMaterial({ color: '#0b140e' })
+  );
+  voidPlane.rotation.x = -Math.PI / 2;
+  voidPlane.position.set(w / 2, -0.15, d / 2);
+  scene.add(voidPlane);
+
+  controls.target.set(w / 2, 0, d / 2);
+  camera.position.set(w / 2 - Math.max(w, d) * 0.55, Math.max(w, d) * 0.85, d / 2 + Math.max(w, d) * 0.75);
+  controls.update();
+}
+
+// shared geometry/material per tile type — only position/type vary per instance
+const floorGeo = new THREE.BoxGeometry(TILE_SIZE * 0.98, 0.5, TILE_SIZE * 0.98);
+const wallGeo = new THREE.BoxGeometry(TILE_SIZE * 0.98, WALL_HEIGHT * 0.98, TILE_SIZE * 0.98);
+const materials = {};
+for (const [type, def] of Object.entries(TILE_TYPES)) {
+  materials[type] = new THREE.MeshLambertMaterial({
+    color: def.color, transparent: type === 'water', opacity: type === 'water' ? 0.85 : 1,
+  });
+}
+
+const floorMeshes = new Map();
+const wallMeshes = new Map();
+
+function cellCenter(gx, gz) { return [(gx + 0.5) * TILE_SIZE, (gz + 0.5) * TILE_SIZE]; }
+
+function setFloorMesh(key, gx, gz, type) {
+  const old = floorMeshes.get(key);
+  if (old) { scene.remove(old); floorMeshes.delete(key); }
+  const [x, z] = cellCenter(gx, gz);
+  const mesh = new THREE.Mesh(floorGeo, materials[type]);
+  mesh.position.set(x, -0.25, z);
+  mesh.userData = { kind: 'floor', gx, gz };
+  scene.add(mesh);
+  floorMeshes.set(key, mesh);
+}
+function removeFloorMesh(key) {
+  const m = floorMeshes.get(key);
+  if (m) { scene.remove(m); floorMeshes.delete(key); }
+}
+function setWallMesh(key, gx, gz, gy, type) {
+  const old = wallMeshes.get(key);
+  if (old) { scene.remove(old); wallMeshes.delete(key); }
+  const [x, z] = cellCenter(gx, gz);
+  const mesh = new THREE.Mesh(wallGeo, materials[type]);
+  mesh.position.set(x, gy * WALL_HEIGHT + WALL_HEIGHT / 2, z);
+  mesh.userData = { kind: 'wall', gx, gz, gy };
+  scene.add(mesh);
+  wallMeshes.set(key, mesh);
+}
+function removeWallMesh(key) {
+  const m = wallMeshes.get(key);
+  if (m) { scene.remove(m); wallMeshes.delete(key); }
+}
+
+// hover cursor + selection outline
+const cursor = new THREE.Mesh(
+  new THREE.BoxGeometry(1, 1, 1),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false })
+);
+cursor.visible = false;
+scene.add(cursor);
+
+const selOutline = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
+  new THREE.LineBasicMaterial({ color: 0xffe763, depthTest: false })
+);
+selOutline.visible = false;
+scene.add(selOutline);
+
+function toolColor() {
+  if (state.tool === 'erase') return 0xff3b3b;
+  if (state.tool === 'select') return 0xffffff;
+  return new THREE.Color(TILE_TYPES[state.tool].color).getHex();
+}
+
+// ---------------------------------------------------------------------
+// Raycasting: paint/select via 3D mesh intersection or ground plane fallback
+// ---------------------------------------------------------------------
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const hitPoint = new THREE.Vector3();
+
+function pointerToCell(clientX, clientY) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+
+  if (state.mode === 'wall') {
+    const targets = [...floorMeshes.values(), ...wallMeshes.values()];
+    const intersects = raycaster.intersectObjects(targets);
+
+    if (intersects.length > 0) {
+      const hit = intersects[0];
+      const userData = hit.object.userData;
+      if (userData && (userData.kind === 'floor' || userData.kind === 'wall')) {
+        if (state.tool === 'select' || state.tool === 'erase') {
+          return {
+            gx: userData.gx,
+            gz: userData.gz,
+            gy: userData.kind === 'wall' ? userData.gy : undefined
+          };
+        } else {
+          // Placement mode: find cell adjacent to intersected face
+          const gx = userData.gx;
+          const gz = userData.gz;
+          const gy = userData.kind === 'wall' ? userData.gy : -1;
+
+          const nx = Math.round(hit.face.normal.x);
+          const ny = Math.round(hit.face.normal.y);
+          const nz = Math.round(hit.face.normal.z);
+
+          const targetGx = gx + nx;
+          const targetGz = gz + nz;
+          const targetGy = Math.max(0, gy + ny);
+
+          if (targetGx >= 0 && targetGz >= 0 && targetGx < state.width && targetGz < state.depth) {
+            return { gx: targetGx, gz: targetGz, gy: targetGy };
+          }
+        }
+      }
+    }
+  }
+
+  // Fallback: intersect with ground plane at target height
+  const planeY = state.mode === 'floor' ? 0 : state.layer * WALL_HEIGHT + WALL_HEIGHT / 2;
+  groundPlane.constant = -planeY;
+  if (!raycaster.ray.intersectPlane(groundPlane, hitPoint)) return null;
+  const gx = Math.floor(hitPoint.x / TILE_SIZE);
+  const gz = Math.floor(hitPoint.z / TILE_SIZE);
+  if (gx < 0 || gz < 0 || gx >= state.width || gz >= state.depth) return null;
+  return { gx, gz, gy: state.mode === 'floor' ? undefined : state.layer };
+}
+
+let lastCell = null;
+let isPainting = false;
+
+function updateCursor(cell) {
+  if (!cell) { cursor.visible = false; return; }
+  cursor.visible = true;
+  const [x, z] = cellCenter(cell.gx, cell.gz);
+  cursor.material.color.setHex(toolColor());
+  if (state.mode === 'floor' || cell.gy === undefined) {
+    cursor.scale.set(TILE_SIZE * 0.96, 0.6, TILE_SIZE * 0.96);
+    cursor.position.set(x, 0.3, z);
+  } else {
+    cursor.scale.set(TILE_SIZE * 0.96, WALL_HEIGHT * 0.96, TILE_SIZE * 0.96);
+    cursor.position.set(x, cell.gy * WALL_HEIGHT + WALL_HEIGHT / 2, z);
+  }
+}
+
+function updateSelectionOutline() {
+  const sel = state.selected;
+  if (!sel) { selOutline.visible = false; return; }
+  const [x, z] = cellCenter(sel.gx, sel.gz);
+  selOutline.visible = true;
+  if (sel.kind === 'floor') {
+    selOutline.scale.set(TILE_SIZE, 0.7, TILE_SIZE);
+    selOutline.position.set(x, -0.2, z);
+  } else {
+    selOutline.scale.set(TILE_SIZE, WALL_HEIGHT, TILE_SIZE);
+    selOutline.position.set(x, sel.gy * WALL_HEIGHT + WALL_HEIGHT / 2, z);
+  }
+}
+
+function applyToolAtCell(gx, gz, gy) {
+  if (state.mode === 'floor' || gy === undefined) {
+    const key = `${gx},${gz}`;
+    if (state.tool === 'erase') {
+      state.floor.delete(key);
+      removeFloorMesh(key);
+      if (state.selected?.kind === 'floor' && state.selected.gx === gx && state.selected.gz === gz) selectNone();
+      return;
+    }
+    if (state.tool === 'select') { selectFloor(gx, gz); return; }
+    const type = state.tool;
+    state.floor.set(key, { type, spawns: { ...(state.typeDefaults[type] || {}) } });
+    setFloorMesh(key, gx, gz, type);
+    selectFloor(gx, gz);
+  } else {
+    const key = `${gx},${gz},${gy}`;
+    if (state.tool === 'erase') {
+      state.walls.delete(key);
+      removeWallMesh(key);
+      if (state.selected?.kind === 'wall' && state.selected.gx === gx && state.selected.gz === gz && state.selected.gy === gy) selectNone();
+      return;
+    }
+    if (state.tool === 'select') { selectWall(gx, gz, gy); return; }
+    const type = state.tool;
+    state.walls.set(key, { type, spawns: { ...(state.typeDefaults[type] || {}) } });
+    setWallMesh(key, gx, gz, gy, type);
+    selectWall(gx, gz, gy);
+  }
+}
+
+function selectFloor(gx, gz) {
+  const tile = state.floor.get(`${gx},${gz}`);
+  state.selected = tile ? { kind: 'floor', gx, gz } : null;
+  updateSelectionOutline();
+  renderInspector();
+}
+function selectWall(gx, gz, gy) {
+  const tile = state.walls.get(`${gx},${gz},${gy}`);
+  state.selected = tile ? { kind: 'wall', gx, gz, gy } : null;
+  updateSelectionOutline();
+  renderInspector();
+}
+function selectNone() {
+  state.selected = null;
+  updateSelectionOutline();
+  renderInspector();
+}
+function selectedTileObj() {
+  const sel = state.selected;
+  if (!sel) return null;
+  return sel.kind === 'floor' ? state.floor.get(`${sel.gx},${sel.gz}`) : state.walls.get(`${sel.gx},${sel.gz},${sel.gy}`);
+}
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  isPainting = true;
+  const cell = pointerToCell(e.clientX, e.clientY);
+  if (cell) {
+    applyToolAtCell(cell.gx, cell.gz, cell.gy);
+    const updatedCell = pointerToCell(e.clientX, e.clientY);
+    lastCell = updatedCell;
+    updateCursor(updatedCell);
+  }
+});
+window.addEventListener('pointerup', () => { isPainting = false; });
+renderer.domElement.addEventListener('pointermove', (e) => {
+  const cell = pointerToCell(e.clientX, e.clientY);
+  lastCell = cell;
+  updateCursor(cell);
+  document.getElementById('status').textContent = cell
+    ? `${state.mode === 'floor' ? 'Floor' : 'Wall layer ' + (cell.gy !== undefined ? cell.gy : state.layer)} · cell (${cell.gx}, ${cell.gz})`
+    : '';
+  if (isPainting && cell && (state.tool !== 'select')) {
+    applyToolAtCell(cell.gx, cell.gz, cell.gy);
+    const updatedCell = pointerToCell(e.clientX, e.clientY);
+    lastCell = updatedCell;
+    updateCursor(updatedCell);
+  }
+});
+renderer.domElement.addEventListener('pointerleave', () => { lastCell = null; updateCursor(null); });
+
+// ---------------------------------------------------------------------
+// Resize handling
+// ---------------------------------------------------------------------
+function resizeRenderer() {
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resizeRenderer);
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// ---------------------------------------------------------------------
+// UI: toolbar
+// ---------------------------------------------------------------------
+const toolGroup = document.getElementById('toolGroup');
+function renderToolbar() {
+  toolGroup.innerHTML = '';
+  const types = state.mode === 'floor' ? FLOOR_TYPES : WALL_TYPES;
+  const label = document.createElement('span');
+  label.className = 'grouplabel';
+  label.textContent = 'Tool';
+  toolGroup.appendChild(label);
+  for (const type of [...types, 'select', 'erase']) {
+    const btn = document.createElement('button');
+    btn.className = 'toolbtn' + (state.tool === type ? ' active' : '');
+    if (TILE_TYPES[type]) {
+      const swatch = document.createElement('span');
+      swatch.className = 'swatch';
+      swatch.style.background = TILE_TYPES[type].color;
+      btn.appendChild(swatch);
+      btn.appendChild(document.createTextNode(TILE_TYPES[type].name));
+    } else {
+      btn.appendChild(document.createTextNode(type === 'select' ? 'Select' : 'Erase'));
+    }
+    btn.onclick = () => { state.tool = type; renderToolbar(); updateCursor(lastCell); };
+    toolGroup.appendChild(btn);
+  }
+}
+
+document.querySelectorAll('.modebtn').forEach((btn) => {
+  btn.onclick = () => {
+    state.mode = btn.dataset.mode;
+    document.querySelectorAll('.modebtn').forEach((b) => b.classList.toggle('active', b === btn));
+    document.getElementById('layerGroup').style.display = state.mode === 'wall' ? 'flex' : 'none';
+    state.tool = state.mode === 'floor' ? FLOOR_TYPES[0] : WALL_TYPES[0];
+    renderToolbar();
+    selectNone();
+    updateCursor(lastCell);
+  };
+});
+document.querySelector('.modebtn[data-mode="floor"]').classList.add('active');
+renderToolbar();
+
+document.getElementById('layerDown').onclick = () => { state.layer--; document.getElementById('layerLabel').textContent = state.layer; updateCursor(lastCell); };
+document.getElementById('layerUp').onclick = () => { state.layer++; document.getElementById('layerLabel').textContent = state.layer; updateCursor(lastCell); };
+
+// ---------------------------------------------------------------------
+// UI: grid resize / clear
+// ---------------------------------------------------------------------
+document.getElementById('gridW').value = state.width;
+document.getElementById('gridD').value = state.depth;
+document.getElementById('resizeBtn').onclick = () => {
+  const w = Math.max(2, Math.min(120, parseInt(document.getElementById('gridW').value, 10) || state.width));
+  const d = Math.max(2, Math.min(120, parseInt(document.getElementById('gridD').value, 10) || state.depth));
+  state.width = w; state.depth = d;
+  document.getElementById('gridW').value = w;
+  document.getElementById('gridD').value = d;
+  for (const [key, tile] of [...state.floor]) {
+    const [gx, gz] = key.split(',').map(Number);
+    if (gx >= w || gz >= d) { state.floor.delete(key); removeFloorMesh(key); }
+  }
+  for (const [key, tile] of [...state.walls]) {
+    const [gx, gz] = key.split(',').map(Number);
+    if (gx >= w || gz >= d) { state.walls.delete(key); removeWallMesh(key); }
+  }
+  selectNone();
+  rebuildGridVisuals();
+};
+
+document.getElementById('clearBtn').onclick = () => {
+  if (!confirm('Clear the entire map? This cannot be undone.')) return;
+  for (const key of [...floorMeshes.keys()]) removeFloorMesh(key);
+  for (const key of [...wallMeshes.keys()]) removeWallMesh(key);
+  state.floor.clear();
+  state.walls.clear();
+  selectNone();
+};
+
+// ---------------------------------------------------------------------
+// UI: mob manager
+// ---------------------------------------------------------------------
+const mobList = document.getElementById('mobList');
+function renderMobList() {
+  mobList.innerHTML = '';
+  for (const mob of state.mobs) {
+    const row = document.createElement('div');
+    row.className = 'mobrow';
+    const color = document.createElement('input');
+    color.type = 'color'; color.value = mob.color;
+    color.oninput = () => { mob.color = color.value; renderDefaultsList(); renderInspector(); };
+    const name = document.createElement('input');
+    name.type = 'text'; name.value = mob.name;
+    name.oninput = () => { mob.name = name.value; renderDefaultsList(); renderInspector(); };
+    const del = document.createElement('button');
+    del.className = 'smallbtn danger'; del.textContent = '✕';
+    del.onclick = () => {
+      if (!confirm(`Remove mob "${mob.name}"? Its spawn weights will be cleared from all tiles.`)) return;
+      state.mobs = state.mobs.filter((m) => m !== mob);
+      for (const t of state.floor.values()) delete t.spawns[mob.id];
+      for (const t of state.walls.values()) delete t.spawns[mob.id];
+      for (const d of Object.values(state.typeDefaults)) delete d[mob.id];
+      renderMobList(); renderDefaultsList(); renderInspector();
+    };
+    row.append(color, name, del);
+    mobList.appendChild(row);
+  }
+}
+document.getElementById('addMobBtn').onclick = () => {
+  const nameEl = document.getElementById('newMobName');
+  const colorEl = document.getElementById('newMobColor');
+  const name = nameEl.value.trim();
+  if (!name) return;
+  state.mobs.push({ id: `mob${++mobSeq}`, name, color: colorEl.value });
+  nameEl.value = '';
+  renderMobList(); renderDefaultsList(); renderInspector();
+};
+
+// ---------------------------------------------------------------------
+// UI: type defaults
+// ---------------------------------------------------------------------
+const defaultsType = document.getElementById('defaultsType');
+for (const type of Object.keys(TILE_TYPES)) {
+  const opt = document.createElement('option');
+  opt.value = type; opt.textContent = TILE_TYPES[type].name;
+  defaultsType.appendChild(opt);
+}
+defaultsType.value = defaultsPanelType;
+defaultsType.onchange = () => { defaultsPanelType = defaultsType.value; renderDefaultsList(); };
+
+const defaultsList = document.getElementById('defaultsList');
+function renderDefaultsList() {
+  defaultsList.innerHTML = '';
+  const defs = state.typeDefaults[defaultsPanelType];
+  if (state.mobs.length === 0) { defaultsList.innerHTML = '<p class="muted">No mobs yet.</p>'; return; }
+  for (const mob of state.mobs) {
+    const row = document.createElement('div');
+    row.className = 'weightrow';
+    const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = mob.color;
+    const name = document.createElement('span'); name.className = 'name'; name.textContent = mob.name;
+    const input = document.createElement('input');
+    input.type = 'number'; input.min = '0'; input.step = '1';
+    input.value = defs[mob.id] ?? 0;
+    input.oninput = () => {
+      const v = parseFloat(input.value) || 0;
+      if (v <= 0) delete defs[mob.id]; else defs[mob.id] = v;
+    };
+    row.append(dot, name, input);
+    defaultsList.appendChild(row);
+  }
+}
+document.getElementById('applyDefaultsBtn').onclick = () => {
+  const type = defaultsPanelType;
+  const defs = state.typeDefaults[type];
+  let count = 0;
+  for (const tile of state.floor.values()) if (tile.type === type) { tile.spawns = { ...defs }; count++; }
+  for (const tile of state.walls.values()) if (tile.type === type) { tile.spawns = { ...defs }; count++; }
+  renderInspector();
+  alert(`Applied defaults to ${count} existing ${TILE_TYPES[type].name} tile(s).`);
+};
+
+// ---------------------------------------------------------------------
+// UI: tile inspector
+// ---------------------------------------------------------------------
+const inspector = document.getElementById('inspector');
+function renderInspector() {
+  const sel = state.selected;
+  const tile = selectedTileObj();
+  if (!sel || !tile) {
+    inspector.innerHTML = '<p class="muted">Nothing selected. Use the Select tool, or place a tile.</p>';
+    return;
+  }
+  inspector.innerHTML = '';
+  const header = document.createElement('div');
+  header.style.marginBottom = '8px';
+  header.innerHTML = `<strong>${TILE_TYPES[tile.type].name}</strong><br/><span class="muted">(${sel.gx}, ${sel.gz}${sel.kind === 'wall' ? `, layer ${sel.gy}` : ''})</span>`;
+  inspector.appendChild(header);
+
+  if (state.mobs.length === 0) {
+    const p = document.createElement('p'); p.className = 'muted'; p.textContent = 'No mobs yet.';
+    inspector.appendChild(p);
+  }
+  for (const mob of state.mobs) {
+    const row = document.createElement('div');
+    row.className = 'weightrow';
+    const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = mob.color;
+    const name = document.createElement('span'); name.className = 'name'; name.textContent = mob.name;
+    const input = document.createElement('input');
+    input.type = 'number'; input.min = '0'; input.step = '1';
+    input.value = tile.spawns[mob.id] ?? 0;
+    input.oninput = () => {
+      const v = parseFloat(input.value) || 0;
+      if (v <= 0) delete tile.spawns[mob.id]; else tile.spawns[mob.id] = v;
+    };
+    row.append(dot, name, input);
+    inspector.appendChild(row);
+  }
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'smallbtn danger';
+  removeBtn.style.marginTop = '8px';
+  removeBtn.textContent = 'Remove tile';
+  removeBtn.onclick = () => {
+    if (sel.kind === 'floor') {
+      const key = `${sel.gx},${sel.gz}`;
+      state.floor.delete(key); removeFloorMesh(key);
+    } else {
+      const key = `${sel.gx},${sel.gz},${sel.gy}`;
+      state.walls.delete(key); removeWallMesh(key);
+    }
+    selectNone();
+  };
+  inspector.appendChild(removeBtn);
+}
+
+// ---------------------------------------------------------------------
+// Export / import
+// ---------------------------------------------------------------------
+function buildExport() {
+  return {
+    formatVersion: 1,
+    tileSize: TILE_SIZE,
+    wallHeight: WALL_HEIGHT,
+    width: state.width,
+    depth: state.depth,
+    tileTypes: TILE_TYPES,
+    mobs: state.mobs,
+    typeDefaults: state.typeDefaults,
+    // omit empty spawns objects — import treats missing spawns as {}, and
+    // on a fully painted map they dominate the file size
+    floor: [...state.floor.entries()].map(([key, t]) => {
+      const [gx, gz] = key.split(',').map(Number);
+      const tile = { gx, gz, type: t.type };
+      if (Object.keys(t.spawns).length) tile.spawns = t.spawns;
+      return tile;
+    }),
+    walls: [...state.walls.entries()].map(([key, t]) => {
+      const [gx, gz, gy] = key.split(',').map(Number);
+      const tile = { gx, gz, gy, type: t.type };
+      if (Object.keys(t.spawns).length) tile.spawns = t.spawns;
+      return tile;
+    }),
+  };
+}
+document.getElementById('exportBtn').onclick = () => {
+  // no pretty-print: a large painted map is thousands of tiles, and the
+  // indentation more than doubles the file
+  const blob = new Blob([JSON.stringify(buildExport())], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'map.json';
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+function loadFromJson(data) {
+  for (const key of [...floorMeshes.keys()]) removeFloorMesh(key);
+  for (const key of [...wallMeshes.keys()]) removeWallMesh(key);
+  state.floor.clear();
+  state.walls.clear();
+
+  state.width = data.width || 20;
+  state.depth = data.depth || 20;
+  state.mobs = Array.isArray(data.mobs) ? data.mobs : state.mobs;
+  mobSeq = state.mobs.reduce((max, m) => {
+    const n = /^mob(\d+)$/.exec(m.id);
+    return n ? Math.max(max, parseInt(n[1], 10)) : max;
+  }, 0);
+  state.typeDefaults = Object.fromEntries(Object.keys(TILE_TYPES).map((t) => [t, (data.typeDefaults && data.typeDefaults[t]) || {}]));
+
+  for (const t of data.floor || []) {
+    if (!TILE_TYPES[t.type] || TILE_TYPES[t.type].isWall) continue;
+    const key = `${t.gx},${t.gz}`;
+    state.floor.set(key, { type: t.type, spawns: { ...(t.spawns || {}) } });
+    setFloorMesh(key, t.gx, t.gz, t.type);
+  }
+  for (const t of data.walls || []) {
+    if (!TILE_TYPES[t.type] || !TILE_TYPES[t.type].isWall) continue;
+    const key = `${t.gx},${t.gz},${t.gy}`;
+    state.walls.set(key, { type: t.type, spawns: { ...(t.spawns || {}) } });
+    setWallMesh(key, t.gx, t.gz, t.gy, t.type);
+  }
+
+  document.getElementById('gridW').value = state.width;
+  document.getElementById('gridD').value = state.depth;
+  selectNone();
+  rebuildGridVisuals();
+  renderMobList();
+  renderDefaultsList();
+}
+
+document.getElementById('importBtn').onclick = () => document.getElementById('importFile').click();
+document.getElementById('importFile').onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      loadFromJson(data);
+    } catch (err) {
+      alert('Could not read that file as a map.json: ' + err.message);
+    }
+    e.target.value = '';
+  };
+  reader.readAsText(file);
+};
+
+// ---------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------
+resizeRenderer();
+rebuildGridVisuals();
+renderMobList();
+renderDefaultsList();
+renderInspector();
+animate();
+</script>
+</body>
+</html>

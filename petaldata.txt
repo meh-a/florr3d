@@ -1,0 +1,23 @@
+## RICE
+
+Rice is a legacy petal in florr.io, added on November 2, 2020. It has weak damage and health stats, but reloads almost instantly. Rice is dropped by Baby Ants.
+
+Rice appears as a white petal in the shape of an elongated, thinner jellybean with a light-gray border, slightly larger than Light.
+
+## GLASS
+
+Glass is a petal in florr.io. It phases through entities and cannot damage the same entity more often than once per second. Glass is dropped by Sandstorms and Soldier Ants.
+
+As its name implies, Glass is a shard of a glass. While in-game, it can morph into many different shapes: it can be assumed that the game draws 5 different points, then joins them and fills in the outline with a transparent white color. Its petal icon displays one of its various forms: an irregular pentagonal shape
+
+## LEAF
+
+Leaf is a legacy petal in florr.io, added on May 14, 2020. It heals the user passively by a set amount of HP per second. Leaf is dropped by Baby Ants, Centipedes, Leafbugs and Worker Ants.
+
+Leaf's appearance is true to its name: it's a leaf shaped petal, somewhat resembling an oval, but is pointed on one end. It is green with a darker green outline. In addition, a dark green stripe is located in the middle that runs down most of the length of the leaf. A dark green rectangle (the stem) is located at the rounded end of the oval.
+
+## CORN
+
+Corn is a legacy petal in florr.io, added on November 2, 2020. It has a long respawn time and a relatively low damage stat, but an extremely high health stat. Corn is dropped by Worker Ants and Worker Fire Ants.
+
+Corn looks like a yellow tooth-shaped form, and its borders are even more yellow, resembling a piece of corn.

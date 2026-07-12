@@ -216,7 +216,7 @@ export class UI {
     this.tt.rarity.textContent = rarity.name;
     this.tt.rarity.style.color = rarity.color;
     this.tt.desc.textContent = def.desc || '';
-    this.tt.health.textContent = `Health: ${Math.round(def.hp * rarity.petalMult * 10) / 10}`;
+    this.tt.health.textContent = `Health: ${Math.round(def.hp * (def.flatHp ? 1 : rarity.petalMult) * 10) / 10}`;
     this.tt.damage.textContent = `Damage: ${Math.round(def.dmg * rarity.petalMult * 10) / 10}`;
     if (def.heal) {
       this.tt.heal.textContent = `Heal: ${Math.round(def.heal * rarity.petalMult * 10) / 10}`;

@@ -1,5 +1,5 @@
 import { WebSocketServer } from 'ws';
-import { encodeState } from '../shared/protocol.js';
+import { encodeState, decodeCmd } from '../shared/protocol.js';
 import { World } from './world.js';
 import { sessionFromCookie } from './auth.js';
 import { loadSave, writeSave } from './db.js';
@@ -17,6 +17,10 @@ const HEARTBEAT_MS = 30_000;
 // this ceiling we cut the connection instead of buffering; the player
 // couldn't play at that latency anyway, and close() cleanup saves them.
 const MAX_BUFFERED = 1_000_000;
+// Per-IP connection cap: someone spammed ~50 tabs (all idle flowers at
+// spawn) to lag the server. High enough for a family/dorm NAT sharing one
+// address, far too low to matter as a lag weapon.
+const MAX_CONNS_PER_IP = 6;
 
 // Attach the game websocket endpoint to an existing http server (the vite
 // dev/preview server in development, or server/index.js standalone). Uses
@@ -51,7 +55,15 @@ export function attachGameServer(httpServer, path = '/ws') {
   const sockets = new Map();    // playerId -> ws
   const spectators = new Map(); // ws -> { key, target } for pre-join connections
   const accounts = new Map();   // playerId -> accountId, for logged-in players
+  const ipCounts = new Map();   // client ip -> open connection count
   let nextSpecKey = 1;
+
+  // Caddy fronts the game in production, so the peer address is always
+  // localhost — the real client is the first X-Forwarded-For hop. In dev
+  // there's no proxy and the socket address is the client itself.
+  const clientIp = (req) =>
+    req.headers['x-forwarded-for']?.split(',')[0].trim()
+    || req.socket.remoteAddress;
 
   // periodic safety net; the authoritative save happens on disconnect
   setInterval(() => {
@@ -64,6 +76,11 @@ export function attachGameServer(httpServer, path = '/ws') {
   httpServer.on('upgrade', (req, socket, head) => {
     const { pathname } = new URL(req.url, 'http://localhost');
     if (pathname !== path) return; // someone else's upgrade (e.g. vite HMR)
+    if ((ipCounts.get(clientIp(req)) || 0) >= MAX_CONNS_PER_IP) {
+      socket.write('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });
 
@@ -149,14 +166,22 @@ export function attachGameServer(httpServer, path = '/ws') {
 
   wss.on('connection', (ws, req) => {
     let player = null; // spawned lazily by `join`, not on connect
+    const ip = clientIp(req);
+    ipCounts.set(ip, (ipCounts.get(ip) || 0) + 1);
     const accountId = sessionFromCookie(req?.headers?.cookie);
     spectators.set(ws, { key: `spec${nextSpecKey++}`, target: null });
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
 
-    ws.on('message', (data) => {
+    ws.on('message', (data, isBinary) => {
+      // binary frame = command from a current client; text frame = JSON from
+      // a pre-binary bundle that hasn't auto-reloaded yet
       let msg;
-      try { msg = JSON.parse(data); } catch { return; }
+      if (isBinary) {
+        try { msg = decodeCmd(data); } catch { return; }
+      } else {
+        try { msg = JSON.parse(data); } catch { return; }
+      }
       if (!player) {
         // spectators have exactly one valid intent: joining the world
         if (msg?.t === 'join') {
@@ -177,6 +202,8 @@ export function attachGameServer(httpServer, path = '/ws') {
       try { world.handle(player.id, msg); } catch (err) { console.error('bad message', err); }
     });
     ws.on('close', () => {
+      const n = (ipCounts.get(ip) || 0) - 1;
+      if (n > 0) ipCounts.set(ip, n); else ipCounts.delete(ip);
       spectators.delete(ws);
       if (player) {
         const acct = accounts.get(player.id);

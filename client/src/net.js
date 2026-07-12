@@ -8,7 +8,7 @@
 // (attached to the vite server in dev, server/index.js standalone), and if
 // the very first connection attempt fails — e.g. a static deploy like GitHub
 // Pages — it falls back to running the same server sim in a Web Worker.
-import { decodeState } from '../../shared/protocol.js';
+import { decodeState, encodeCmd } from '../../shared/protocol.js';
 
 const DEDICATED_URL = import.meta.env.VITE_WS_URL;
 
@@ -75,6 +75,6 @@ export class Net {
 
   send(obj) {
     if (this.worker) this.worker.postMessage(obj);
-    else if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(obj));
+    else if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(encodeCmd(obj));
   }
 }

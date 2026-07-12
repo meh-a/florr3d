@@ -7,6 +7,7 @@ import { EntitySync } from './entities.js';
 import { Arrows } from './arrows.js';
 import { Net } from './net.js';
 import { preloadMobModels } from './mobmodels.js';
+import { makeMinimap } from './minimap.js';
 import { MOB_TYPES } from '../../shared/config.js';
 import { initQualityToggle } from './settings.js';
 
@@ -156,6 +157,8 @@ Promise.all([
     });
   }
 
+  const updateMinimap = makeMinimap(document.getElementById('hud'));
+
   const clock = new THREE.Clock();
   function loop() {
     requestAnimationFrame(loop);
@@ -167,6 +170,7 @@ Promise.all([
 
     updateCamera(dt, game.entities.playerPos(), game.fpsMode ? game.input.look : null);
     game.arrows.update(); // after the camera move so arrows don't lag a frame
+    updateMinimap(game.entities.playerPos());
     renderer.render(scene, camera);
   }
   loop();

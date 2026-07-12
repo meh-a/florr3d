@@ -114,6 +114,9 @@
     #tooltip .tt-heal { color: #ff94c9; }
 
     /* quality toggle */
+    #minimap { position: absolute; bottom: 48px; right: 14px; width: 140px; height: 140px;
+               border: 2px solid rgba(0, 0, 0, 0.35); border-radius: 6px; opacity: 0.92;
+               pointer-events: none; image-rendering: pixelated; }
     #quality { position: absolute; bottom: 14px; right: 14px; font-size: 14px;
                background: rgba(15,20,15,0.6); padding: 6px 14px; border-radius: 999px;
                cursor: pointer; transition: transform 0.08s; }
@@ -219,6 +222,6 @@
       <div class="small stroke" id="deathtimer">Respawning…</div>
     </div>
   </div>
-  <script type="module" src="/src/main.js"></script>
+  <script type="module" src="/src/boot.js"></script>
 </body>
 </html>

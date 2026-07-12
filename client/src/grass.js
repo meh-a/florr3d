@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ARENA_HALF, TILE_SIZE, MAP_TILES } from '../../shared/config.js';
+import { ARENA_HALF, TILE_SIZE, MAP_TILES, MAP_WALLS } from '../../shared/config.js';
 
 // Ultra-quality photorealistic grass: one InstancedBufferGeometry of tapered
 // blades, positioned and animated entirely in the vertex shader. The blades
@@ -16,18 +16,27 @@ const BLADE_COUNT = 80000;
 const PATCH = 96;              // patch side length (world units)
 const BLADE_HEIGHT = 0.8;      // nominal height, scaled ±~40% per blade
 const BLADE_HALF_WIDTH = 0.055;
-const GROUND_HALF = ARENA_HALF + 5; // matches the ground plane extent
 
-// blades must not sprout inside recessed water basins (or their dirt lip)
-const WATER_CULL_GLSL = MAP_TILES
-  .filter((t) => t.type === 'water')
-  .map((t) => {
-    const cx = (t.gx * TILE_SIZE).toFixed(1);
-    const cz = (t.gz * TILE_SIZE).toFixed(1);
-    const half = (TILE_SIZE / 2 + 0.4).toFixed(1);
-    return `if (max(abs(anchor.x - (${cx})), abs(anchor.y - (${cz}))) < ${half}) scale = 0.0;`;
-  })
-  .join('\n        ');
+// Blades must not sprout on any non-grass tile: inside recessed water
+// basins, or through the desert/jungle/dirt overlays. The whole grid is
+// baked into a one-byte-per-cell mask texture (255 = grass) that the vertex
+// shader samples per blade, so cull cost is flat no matter how many tiles a
+// map paints. Returns { texture, cells, halfCells } for the shader.
+function tileMaskTexture() {
+  const halfCells = Math.ceil(ARENA_HALF / TILE_SIZE);
+  const cells = halfCells * 2 + 1;
+  const data = new Uint8Array(cells * cells).fill(255);
+  for (const t of [...MAP_TILES, ...MAP_WALLS]) {
+    if (t.type === 'grass') continue;
+    const ix = t.gx + halfCells, iz = t.gz + halfCells;
+    if (ix < 0 || iz < 0 || ix >= cells || iz >= cells) continue;
+    data[iz * cells + ix] = 0;
+  }
+  const texture = new THREE.DataTexture(data, cells, cells, THREE.RedFormat, THREE.UnsignedByteType);
+  texture.magFilter = texture.minFilter = THREE.NearestFilter;
+  texture.needsUpdate = true;
+  return { texture, cells, halfCells };
+}
 
 // A single blade: three tapering quad rows plus a pointed tip, in the XY
 // plane (x = width, y = 0..1 along the blade). 7 verts / 5 tris.
@@ -58,6 +67,9 @@ function bladeGeometry() {
 }
 
 export function makeGrass(scene, sunDir) {
+  // read at call time (after boot.js has applied any loaded map)
+  const GROUND_HALF = ARENA_HALF + 5; // matches the ground plane extent
+  const mask = tileMaskTexture();
   const material = new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([
       THREE.UniformsLib.fog,
@@ -65,6 +77,7 @@ export function makeGrass(scene, sunDir) {
         uTime: { value: 0 },
         uFocus: { value: new THREE.Vector2() },
         uSunDir: { value: sunDir.clone().normalize() },
+        uTileMask: { value: mask.texture },
       },
     ]),
     side: THREE.DoubleSide,
@@ -75,6 +88,7 @@ export function makeGrass(scene, sunDir) {
       uniform float uTime;
       uniform vec2 uFocus;
       uniform vec3 uSunDir;
+      uniform sampler2D uTileMask;
       varying vec3 vColor;
       varying float vY;
       #include <fog_pars_vertex>
@@ -83,6 +97,9 @@ export function makeGrass(scene, sunDir) {
       const float HALF_P = ${(PATCH / 2).toFixed(1)};
       const float BLADE_HEIGHT = ${BLADE_HEIGHT.toFixed(2)};
       const float GROUND_HALF = ${GROUND_HALF.toFixed(1)};
+      const float TILE = ${TILE_SIZE.toFixed(1)};
+      const float MASK_HALF = ${mask.halfCells.toFixed(1)};
+      const float MASK_N = ${mask.cells.toFixed(1)};
 
       void main() {
         // wrap this instance's patch offset to the world cell nearest uFocus;
@@ -95,7 +112,10 @@ export function makeGrass(scene, sunDir) {
         // is never visible; fog handles everything beyond
         scale *= 1.0 - smoothstep(HALF_P * 0.72, HALF_P * 0.97, distance(anchor, uFocus));
         if (max(abs(anchor.x), abs(anchor.y)) > GROUND_HALF) scale = 0.0;
-        ${WATER_CULL_GLSL}
+        // one nearest-neighbor tap into the tile mask kills blades rooted
+        // on any non-grass cell (cells centered on gx * TILE)
+        vec2 maskUv = (floor(anchor / TILE + 0.5) + MASK_HALF + 0.5) / MASK_N;
+        if (texture2D(uTileMask, maskUv).r < 0.5) scale = 0.0;
 
         float h = position.y; // 0 at root, 1 at tip
         float ca = cos(aRand.x), sa = sin(aRand.x);

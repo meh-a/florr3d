@@ -279,11 +279,14 @@ export function makeHealthBar(width, anisotropy = 1) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = anisotropy;
 
+  // depth-tested (but not writing) so walls and nearer mobs occlude the bar
+  // instead of it floating through everything; renderOrder keeps bar-vs-bar
+  // overlap stable without fighting the transparent distance sort
   const material = new THREE.MeshBasicMaterial({
-    map: texture, transparent: true, depthTest: false, depthWrite: false,
+    map: texture, transparent: true, depthTest: true, depthWrite: false,
   });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
-  mesh.renderOrder = 990;
+  mesh.renderOrder = 2;
 
   // canvas repaint + texture re-upload are the expensive part here, and this
   // gets called every frame for every mob — skip it once the bar has settled

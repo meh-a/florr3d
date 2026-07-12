@@ -10,6 +10,7 @@ import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { attachGameServer } from './ws.js';
 import { handleAuth } from './auth.js';
+import { mapPayload } from './map.js';
 
 const DIST = fileURLToPath(new URL('../dist', import.meta.url));
 const MIME = {
@@ -22,6 +23,14 @@ const port = Number(process.env.PORT) || 8081;
 const server = http.createServer(async (req, res) => {
   if (await handleAuth(req, res)) return;
   const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  // the loaded map, already normalized; 404 tells the client to use the
+  // built-in defaults (must revalidate so a redeployed map propagates)
+  if (pathname === '/map.json') {
+    if (!mapPayload) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' });
+    res.end(JSON.stringify(mapPayload));
+    return;
+  }
   // resolve inside dist/ only; normalize() defuses ../ traversal
   const rel = normalize(pathname).replace(/^(\.\.[/\\])+/, '');
   const file = join(DIST, rel === '/' || rel === '\\' ? 'index.html' : rel);

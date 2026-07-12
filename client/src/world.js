@@ -4,6 +4,7 @@ import { ARENA_HALF, TILE_SIZE, MAP_TILES } from '../../shared/config.js';
 import { damp } from './utils.js';
 import { getQuality } from './settings.js';
 import { makeTiles } from './tiles.js';
+import { makeWalls } from './walls.js';
 import { makeGrass } from './grass.js';
 import grassColorUrl from '../assets/grass_color.jpg';
 
@@ -524,14 +525,18 @@ export function createWorld(container) {
   }
 
   // darker apron outside the bounds — a frame with the arena cut out so it
-  // can never occlude recessed tile basins inside the arena
-  const apronShape = new THREE.Shape();
-  apronShape.moveTo(-350, -350);
-  apronShape.lineTo(350, -350);
-  apronShape.lineTo(350, 350);
-  apronShape.lineTo(-350, 350);
-  const apronHole = new THREE.Path();
+  // can never occlude recessed tile basins inside the arena. The outer edge
+  // must scale with the arena: a hole bigger than its outline makes earcut
+  // emit garbage triangles across the whole map (it did, as a green slab
+  // over the lakes, when the first 500-half map met the old fixed 350)
   const ah = ARENA_HALF + 5;
+  const ao = ah + 180; // fog fully hides the rim long before this
+  const apronShape = new THREE.Shape();
+  apronShape.moveTo(-ao, -ao);
+  apronShape.lineTo(ao, -ao);
+  apronShape.lineTo(ao, ao);
+  apronShape.lineTo(-ao, ao);
+  const apronHole = new THREE.Path();
   apronHole.moveTo(-ah, -ah);
   apronHole.lineTo(ah, -ah);
   apronHole.lineTo(ah, ah);
@@ -545,27 +550,40 @@ export function createWorld(container) {
   apron.position.y = -0.05;
   scene.add(apron);
 
-  // grass plane with holes cut over water tiles so their basins can be
-  // recessed below ground level. Shape space (x, y) maps to world (x, -z)
-  // under the -PI/2 X rotation.
-  const groundShape = new THREE.Shape();
+  // Grass plane with openings over water tiles so their basins can be
+  // recessed below ground level. Built as one quad per grid cell (water
+  // cells skipped) rather than a Shape with holes: earcut can't triangulate
+  // holes that share edges, which is exactly what adjacent water tiles
+  // produce, and a failed triangulation quietly roofs over the lakes.
+  // Plane space (x, y) maps to world (x, -z) under the -PI/2 X rotation;
+  // UVs equal plane coords, matching what ShapeGeometry generated, so the
+  // texture repeat math below is unchanged.
   const groundHalf = ARENA_HALF + 5;
-  groundShape.moveTo(-groundHalf, -groundHalf);
-  groundShape.lineTo(groundHalf, -groundHalf);
-  groundShape.lineTo(groundHalf, groundHalf);
-  groundShape.lineTo(-groundHalf, groundHalf);
-  for (const t of MAP_TILES) {
-    if (t.type !== 'water') continue;
-    const cx = t.gx * TILE_SIZE, cy = -t.gz * TILE_SIZE, h = TILE_SIZE / 2;
-    const hole = new THREE.Path();
-    hole.moveTo(cx - h, cy - h);
-    hole.lineTo(cx + h, cy - h);
-    hole.lineTo(cx + h, cy + h);
-    hole.lineTo(cx - h, cy + h);
-    groundShape.holes.push(hole);
+  const halfCells = Math.ceil(groundHalf / TILE_SIZE);
+  const waterCells = new Set(MAP_TILES.filter((t) => t.type === 'water').map((t) => `${t.gx},${t.gz}`));
+  const positions = [], uvs = [], normals = [], indices = [];
+  const clampG = (v) => Math.max(-groundHalf, Math.min(groundHalf, v));
+  const halfT = TILE_SIZE / 2;
+  for (let gx = -halfCells; gx <= halfCells; gx++) {
+    for (let gz = -halfCells; gz <= halfCells; gz++) {
+      if (waterCells.has(`${gx},${gz}`)) continue;
+      const x0 = clampG(gx * TILE_SIZE - halfT), x1 = clampG(gx * TILE_SIZE + halfT);
+      const y0 = clampG(-gz * TILE_SIZE - halfT), y1 = clampG(-gz * TILE_SIZE + halfT);
+      if (x0 === x1 || y0 === y1) continue; // fully clamped away at the border
+      const base = positions.length / 3;
+      positions.push(x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0);
+      uvs.push(x0, y0, x1, y0, x1, y1, x0, y1);
+      normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
+      indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
   }
+  const groundGeo = new THREE.BufferGeometry();
+  groundGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  groundGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  groundGeo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  groundGeo.setIndex(indices);
   const ground = new THREE.Mesh(
-    new THREE.ShapeGeometry(groundShape),
+    groundGeo,
     new THREE.MeshToonMaterial({ color: '#1ea761' })
   );
   ground.rotation.x = -Math.PI / 2;
@@ -603,6 +621,7 @@ export function createWorld(container) {
     ? (CUBE_SKY ? makeCubeClouds(scene, renderer, sunOffset) : makeVolumetricClouds(scene, renderer, sunOffset))
     : makeCloudField(scene);
   const updateTiles = makeTiles(scene, quality, sunOffset);
+  makeWalls(scene);
   const updateGrass = ultra ? makeGrass(scene, sunOffset) : null;
 
   const camTarget = new THREE.Vector3();

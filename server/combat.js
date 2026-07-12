@@ -21,6 +21,14 @@ export function updateCombat(world, dt) {
     if (mob.deadFlag) continue;
 
     for (const player of players) {
+      // early-out: petals orbit within ~6 of the flower, so a player whose
+      // flower is beyond mob.radius + 8 can't touch this mob with body or
+      // petals — skips the petal loop for every far pair
+      {
+        const dx = mob.pos.x - player.pos.x, dz = mob.pos.z - player.pos.z;
+        const reach = mob.radius + 8;
+        if (dx * dx + dz * dz > reach * reach) continue;
+      }
       // mob vs player body — spawn-immune flowers neither take nor deal
       // body damage (immunity that still let you ram would be a free weapon)
       if (!player.dead && player.immunity <= 0) {

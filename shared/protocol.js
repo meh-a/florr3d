@@ -215,6 +215,85 @@ function readEvent(r) {
   return { e, text: r.str() };
 }
 
+// ---- client -> server commands ----
+// Same version-byte guard as snapshots. decodeCmd returns the exact object
+// shapes world.handle() always took, so the server's message handling
+// doesn't know the transport changed. Buffers come from the network, so
+// decodeCmd must be wrapped in try/catch — truncated frames throw.
+
+const CMD_NAMES = ['join', 'input', 'swapSlot', 'swapRows', 'rotSpeed', 'equip'];
+const CMD = new Map(CMD_NAMES.map((k, i) => [k, i]));
+
+export function encodeCmd(msg) {
+  const w = new Writer();
+  w.u8(PROTOCOL_VERSION);
+  w.u8(CMD.get(msg.t));
+  switch (msg.t) {
+    case 'join':
+      w.str(msg.name);
+      break;
+    case 'input':
+      w.f32(msg.tx); w.f32(msg.tz);
+      w.f32(msg.ax); w.f32(msg.az);
+      w.f32(msg.yaw);
+      w.u8((msg.fps ? 1 : 0) | (msg.atk ? 2 : 0) | (msg.def ? 4 : 0));
+      break;
+    case 'swapSlot':
+      w.u8(msg.i);
+      break;
+    case 'swapRows':
+      break;
+    case 'rotSpeed':
+      w.f32(msg.delta);
+      break;
+    case 'equip': {
+      const [type, rarity] = String(msg.key).split(':');
+      w.u8(msg.row === 'secondary' ? 1 : 0);
+      w.u8(msg.i);
+      w.u8(PETAL_IDX.get(type) ?? 255);
+      w.u8(Number(rarity) & 255);
+      break;
+    }
+    default:
+      throw new Error(`unknown command: ${msg.t}`);
+  }
+  return w.done();
+}
+
+export function decodeCmd(buffer) {
+  const r = new Reader(buffer);
+  const version = r.u8();
+  if (version !== PROTOCOL_VERSION) throw new Error(`protocol mismatch: ${version} != ${PROTOCOL_VERSION}`);
+  const t = CMD_NAMES[r.u8()];
+  switch (t) {
+    case 'join':
+      return { t, name: r.str() };
+    case 'input': {
+      const msg = { t, tx: r.f32(), tz: r.f32(), ax: r.f32(), az: r.f32(), yaw: r.f32() };
+      const flags = r.u8();
+      msg.fps = !!(flags & 1);
+      msg.atk = !!(flags & 2);
+      msg.def = !!(flags & 4);
+      return msg;
+    }
+    case 'swapSlot':
+      return { t, i: r.u8() };
+    case 'swapRows':
+      return { t };
+    case 'rotSpeed':
+      return { t, delta: r.f32() };
+    case 'equip': {
+      const row = r.u8() === 1 ? 'secondary' : 'primary';
+      const i = r.u8();
+      const type = PETAL_IDS[r.u8()];
+      const rarity = r.u8();
+      return { t, row, i, key: `${type}:${rarity}` };
+    }
+    default:
+      throw new Error('unknown command frame');
+  }
+}
+
 // ---- snapshot ----
 
 const list = (w, arr, fn) => { w.u16(arr.length); for (const item of arr) fn(w, item); };

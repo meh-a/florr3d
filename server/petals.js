@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PETAL_TYPES, RARITIES, ARENA_HALF } from '../shared/config.js';
+import { PETAL_TYPES, RARITIES, ARENA_HALF, wallTopAt } from '../shared/config.js';
 import { uid, damp } from './utils.js';
 
 const SLOTS = 5;
@@ -80,6 +80,7 @@ export class PetalManager {
     const def = PETAL_TYPES[slot.type];
     const rarity = RARITIES[slot.rarity];
     const mult = rarity.petalMult;
+    const hpMult = def.flatHp ? 1 : mult;
     const size = def.radius * (1 + slot.rarity * 0.12);
     const out = [];
     for (let j = 0; j < def.count; j++) {
@@ -90,8 +91,8 @@ export class PetalManager {
         rarity: slot.rarity,
         angleFrac: (startPosIdx + j) / total,
         radius: size,
-        maxHp: def.hp * mult,
-        hp: def.hp * mult,
+        maxHp: def.hp * hpMult,
+        hp: def.hp * hpMult,
         dmg: def.dmg * rarity.petalMult,
         heal: (def.heal || 0) * mult,
         reload: def.reload,
@@ -223,7 +224,9 @@ export class PetalManager {
     for (const proj of this.projectiles) {
       proj.pos.addScaledVector(proj.vel, dt);
       proj.life -= dt;
-      if (proj.life <= 0 ||
+      // missiles fly at flower height, so any wall column (min top
+      // WALL_HEIGHT) stops them
+      if (proj.life <= 0 || wallTopAt(proj.pos.x, proj.pos.z) > 1.1 ||
           Math.max(Math.abs(proj.pos.x), Math.abs(proj.pos.z)) > ARENA_HALF + 4) {
         proj.dead = true;
       }
