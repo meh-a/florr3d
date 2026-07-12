@@ -3,7 +3,11 @@ import { World } from './world.js';
 import { sessionFromCookie } from './auth.js';
 import { loadSave, writeSave } from './db.js';
 
-const TICK_MS = 1000 / 30;
+// 20Hz: at 40+ players the per-tick serialize+deflate work saturated the
+// VM's single core at 30Hz (late ticks -> ping spikes -> the dead-peer
+// reaper cutting live players). The client interpolates between snapshots,
+// so the lower rate costs little visually and buys ~35% CPU headroom.
+const TICK_MS = 1000 / 20;
 const AUTOSAVE_MS = 60_000;
 const HEARTBEAT_MS = 30_000;
 // A connection that stops reading keeps readyState OPEN while every send
@@ -63,8 +67,9 @@ export function attachGameServer(httpServer, path = '/ws') {
   setInterval(() => {
     const now = performance.now();
     // clamp like the old client loop so a stalled event loop can't
-    // produce a huge physics step
-    const dt = Math.min((now - last) / 1000, 0.05);
+    // produce a huge physics step (2 ticks of headroom at 20Hz — a hard
+    // clamp at the nominal interval would run the world in slow motion)
+    const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
     if (world.players.size === 0 && spectators.size === 0) return; // empty world idles
     world.tick(dt);
