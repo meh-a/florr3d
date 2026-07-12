@@ -12,11 +12,21 @@ import * as THREE from 'three';
 
 const PITCH_LIMIT = Math.PI / 2 - 0.12;
 
-function button(id, label, bottom) {
+// inline stroke icons (lucide-style paths) — crisp at any DPI, tinted by CSS
+const icon = (paths) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+const ICONS = {
+  camera: icon('<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>'),
+  shield: icon('<path d="M12 3l7 3v6c0 4.7-3.1 7.6-7 9-3.9-1.4-7-4.3-7-9V6z"/>'),
+  sword: icon('<polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" y1="19" x2="19" y2="13"/><line x1="16" y1="16" x2="20" y2="20"/><line x1="19" y1="21" x2="21" y2="19"/>'),
+};
+
+function button(id, iconSvg, bottom) {
   const b = document.createElement('div');
   b.id = id;
   b.className = 'touchbtn';
-  b.textContent = label;
+  b.innerHTML = iconSvg;
   b.style.bottom = `${bottom}px`;
   return b;
 }
@@ -78,9 +88,9 @@ export function setupMobileControls(game, toggleCamera) {
   base.addEventListener('touchcancel', joyEnd);
 
   // ---- action buttons: camera swap, defend, attack ----
-  const camBtn = button('cambtn', '📷', 330);
-  const defBtn = button('defbtn', '🛡️', 262);
-  const atkBtn = button('atkbtn', '⚔️', 194);
+  const camBtn = button('cambtn', ICONS.camera, 330);
+  const defBtn = button('defbtn', ICONS.shield, 262);
+  const atkBtn = button('atkbtn', ICONS.sword, 194);
   hud.append(camBtn, defBtn, atkBtn);
 
   camBtn.addEventListener('touchstart', (e) => { e.preventDefault(); toggleCamera(); }, { passive: false });
