@@ -63,6 +63,21 @@ export function attachGameServer(httpServer, path = '/ws') {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });
 
+  // once-a-minute tick cost breakdown in the journal — sim vs snapshot
+  // build vs serialize+send — so optimization targets are measured, not
+  // guessed. A tick budget is TICK_MS; sustained avg near it means the
+  // core is saturating.
+  const perf = { n: 0, sim: 0, build: 0, send: 0, max: 0 };
+  setInterval(() => {
+    if (perf.n === 0) return;
+    const ms = (v) => (v / perf.n).toFixed(1);
+    console.log(`[tick] players=${world.players.size} spectators=${spectators.size} ` +
+      `avg=${ms(perf.sim + perf.build + perf.send)}ms ` +
+      `(sim=${ms(perf.sim)} build=${ms(perf.build)} send=${ms(perf.send)}) ` +
+      `max=${perf.max.toFixed(1)}ms of ${TICK_MS.toFixed(1)}ms budget`);
+    perf.n = perf.sim = perf.build = perf.send = perf.max = 0;
+  }, 60_000);
+
   let last = performance.now();
   setInterval(() => {
     const now = performance.now();
@@ -72,13 +87,16 @@ export function attachGameServer(httpServer, path = '/ws') {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
     if (world.players.size === 0 && spectators.size === 0) return; // empty world idles
+    const t0 = performance.now();
     world.tick(dt);
+    const t1 = performance.now();
     const specViews = [];
     for (const spec of spectators.values()) {
       spec.target = world.spectateTarget(spec.target);
       specViews.push({ key: spec.key, ...spec.target });
     }
     const snapshots = world.buildSnapshots(specViews);
+    const t2 = performance.now();
     const deliver = (ws, snapshot) => {
       if (ws.readyState !== ws.OPEN) return;
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; }
@@ -86,6 +104,12 @@ export function attachGameServer(httpServer, path = '/ws') {
     };
     for (const [playerId, ws] of sockets) deliver(ws, snapshots.get(playerId));
     for (const [ws, spec] of spectators) deliver(ws, snapshots.get(spec.key));
+    const t3 = performance.now();
+    perf.n++;
+    perf.sim += t1 - t0;
+    perf.build += t2 - t1;
+    perf.send += t3 - t2;
+    perf.max = Math.max(perf.max, t3 - t0);
   }, TICK_MS);
 
   // Dead-peer reaper: a connection that vanished without a FIN never fires
