@@ -45,6 +45,8 @@ export class Input {
     window.addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLInputElement) return; // typing a name, not playing
       const k = e.key.toLowerCase();
+      // space would "click" whatever button was last focused (e.g. Play)
+      if (k === ' ') e.preventDefault();
       this.keys.add(k);
       if (!e.repeat && this.handlers[k]) this.handlers[k]();
     });
@@ -52,6 +54,10 @@ export class Input {
   }
 
   on(key, fn) { this.handlers[key] = fn; }
+
+  // held-intent accessors: mouse buttons or their keyboard equivalents
+  attackHeld() { return this.attack || this.keys.has(' '); }
+  defendHeld() { return this.defend || this.keys.has('shift'); }
 
   lockPointer() {
     this.wantLock = true;
