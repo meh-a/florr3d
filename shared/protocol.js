@@ -1,10 +1,13 @@
-import { PETAL_TYPES, MOB_TYPES } from './config.js';
+import { PETAL_TYPES, MOB_TYPES, VIEW_RADIUS } from './config.js';
 
 // Binary wire format for the per-tick `state` snapshot — the only message
 // that matters for CPU/bandwidth (everything else stays JSON text frames;
-// the client tells them apart by frame type). encodeState produces a
-// Uint8Array; decodeState reconstructs the exact object shape the JSON
-// snapshot had, so the client's consumers don't know the transport changed.
+// the client tells them apart by frame type). Snapshots are DELTAS: the
+// server (DeltaEncoder) tracks per connection which byte-exact version of
+// each entity that client already has and sends only changes + removals;
+// the client (DeltaAssembler) folds them back into the full state-object
+// shape, so neither the sim nor the render layer know the transport
+// changed.
 //
 // Quantization: positions ride as int16 at 1/64 unit (~1.6cm over ±512),
 // angles as int16 at 1/8192 rad, cooldown fractions as u8. hp is float32;
@@ -14,7 +17,7 @@ import { PETAL_TYPES, MOB_TYPES } from './config.js';
 // PROTOCOL_VERSION guards across builds: on mismatch the decoder throws,
 // and the deploy auto-reload flow gets clients onto the matching build.
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 const PETAL_IDS = Object.keys(PETAL_TYPES);
 const MOB_IDS = Object.keys(MOB_TYPES);
@@ -58,6 +61,10 @@ class Writer {
     this.buf.set(bytes.subarray(0, 255), this.at);
     this.at += Math.min(bytes.length, 255);
   }
+  bytes(arr) { this.ensure(arr.length); this.buf.set(arr, this.at); this.at += arr.length; }
+  // reserve a u16 (e.g. a count not known until later) and patch it after
+  mark16() { const at = this.at; this.u16(0); return at; }
+  patch16(at, v) { this.view.setUint16(at, v); }
   done() { return this.buf.subarray(0, this.at); }
 }
 
@@ -86,7 +93,13 @@ class Reader {
   }
 }
 
-// ---- players ----
+// ---- entity records ----
+// Server-side writers take LIVE server objects (Player/Mob instances);
+// readers reconstruct the exact plain shapes the client consumers expect.
+// Players are split in two: a STATIC block (identity + loadout + petal
+// composition — changes rarely) and a DYNAMIC block (position, hp, petal
+// motion — changes every tick). The delta layer resends each block only
+// when its bytes changed.
 
 function writeSlot(w, slot) {
   if (!slot) { w.u8(255); return; }
@@ -99,64 +112,72 @@ function readSlot(r) {
   return { type: PETAL_IDS[t], rarity: r.u8() };
 }
 
-function writePlayer(w, p) {
-  w.u32(p.id);
+function writePlayerStatic(w, p) {
   w.str(p.name);
-  w.pos(p.x); w.pos(p.z); w.ang(p.facing);
-  w.f32(p.hp); w.f32(p.maxHp);
   w.u16(p.level);
-  w.u8((p.dead ? 1 : 0) | (p.imm ? 2 : 0));
-  w.u8(Math.max(0, Math.min(255, Math.round(p.deadTimer * 50))));
+  w.f32(p.maxHp);
   w.frac8((p.petals.rotFactor - 0.3) / 0.7);
   for (const slot of p.petals.primary) writeSlot(w, slot);
   for (const slot of p.petals.secondary) writeSlot(w, slot);
   w.u8(p.petals.instances.length);
   for (const inst of p.petals.instances) {
     w.u32(inst.id);
-    w.u8(inst.slot);
+    w.u8(inst.slotIdx);
     w.u8(PETAL_IDX.get(inst.type));
     w.u8(inst.rarity);
-    w.u8(inst.alive ? 1 : 0);
-    w.pos(inst.x); w.pos(inst.z);
-    w.frac8(inst.cd);
   }
 }
-
-function readPlayer(r) {
-  const p = {
-    id: r.u32(), name: r.str(),
-    x: r.pos(), z: r.pos(), facing: r.ang(),
-    hp: r.f32(), maxHp: r.f32(), level: r.u16(),
+function readPlayerStatic(r) {
+  const s = {
+    name: r.str(), level: r.u16(), maxHp: r.f32(),
+    rotFactor: r.frac8() * 0.7 + 0.3,
+    primary: [], secondary: [], comp: [],
   };
-  const flags = r.u8();
-  p.dead = !!(flags & 1);
-  if (flags & 2) p.imm = true;
-  p.deadTimer = r.u8() / 50;
-  const petals = { rotFactor: r.frac8() * 0.7 + 0.3, primary: [], secondary: [], instances: [] };
-  for (let i = 0; i < 5; i++) petals.primary.push(readSlot(r));
-  for (let i = 0; i < 5; i++) petals.secondary.push(readSlot(r));
+  for (let i = 0; i < 5; i++) s.primary.push(readSlot(r));
+  for (let i = 0; i < 5; i++) s.secondary.push(readSlot(r));
   const n = r.u8();
   for (let i = 0; i < n; i++) {
-    petals.instances.push({
-      id: r.u32(), slot: r.u8(), type: PETAL_IDS[r.u8()], rarity: r.u8(),
-      alive: r.u8() === 1, x: r.pos(), z: r.pos(), cd: r.frac8(),
-    });
+    s.comp.push({ id: r.u32(), slot: r.u8(), type: PETAL_IDS[r.u8()], rarity: r.u8() });
   }
-  p.petals = petals;
-  return p;
+  return s;
 }
 
-// ---- mobs / projectiles / drops ----
+function writePlayerDynamic(w, p) {
+  w.u8((p.dead ? 1 : 0) | (p.immunity > 0 ? 2 : 0));
+  w.pos(p.pos.x); w.pos(p.pos.z); w.ang(p.facing);
+  w.f32(p.hp);
+  w.u8(Math.max(0, Math.min(255, Math.round(p.deadTimer * 50))));
+  w.u8(p.petals.instances.length);
+  for (const inst of p.petals.instances) {
+    w.u8(inst.alive ? 1 : 0);
+    w.pos(inst.pos.x); w.pos(inst.pos.z);
+    w.frac8(inst.alive ? 0 : Math.min(1, Math.max(0, inst.cooldown / inst.reload)));
+  }
+}
+function readPlayerDynamic(r) {
+  const flags = r.u8();
+  const d = {
+    dead: !!(flags & 1), imm: !!(flags & 2),
+    x: r.pos(), z: r.pos(), facing: r.ang(),
+    hp: r.f32(), deadTimer: r.u8() / 50,
+    inst: [],
+  };
+  const n = r.u8();
+  for (let i = 0; i < n; i++) {
+    d.inst.push({ alive: r.u8() === 1, x: r.pos(), z: r.pos(), cd: r.frac8() });
+  }
+  return d;
+}
 
 function writeMob(w, m) {
   w.u32(m.id);
   w.u8(MOB_IDX.get(m.type));
   w.u8(m.rarity);
-  w.pos(m.x); w.pos(m.z); w.ang(m.facing);
+  w.pos(m.pos.x); w.pos(m.pos.z); w.ang(m.facing);
   w.f32(m.hp); w.f32(m.maxHp);
-  const flying = m.y !== undefined;
+  const flying = !!m.flight;
   w.u8((flying ? 1 : 0) | (m.loaded ? 2 : 0));
-  if (flying) { w.pos(m.y); w.ang(m.pitch); }
+  if (flying) { w.pos(m.pos.y); w.ang(m.pitch); }
 }
 function readMob(r) {
   const m = {
@@ -175,7 +196,7 @@ function readMob(r) {
 
 const writeMissile = (w, mi) => {
   w.u32(mi.id); w.u8(mi.rarity);
-  w.pos(mi.x); w.pos(mi.y); w.pos(mi.z);
+  w.pos(mi.pos.x); w.pos(mi.pos.y); w.pos(mi.pos.z);
   w.ang(mi.yaw); w.ang(mi.pitch);
 };
 const readMissile = (r) => ({
@@ -185,7 +206,7 @@ const readMissile = (r) => ({
 
 const writePMissile = (w, pm) => {
   w.u32(pm.id); w.u8(PETAL_IDX.get(pm.type)); w.u8(pm.rarity);
-  w.pos(pm.x); w.pos(pm.z); w.ang(pm.yaw);
+  w.pos(pm.pos.x); w.pos(pm.pos.z); w.ang(pm.yaw);
 };
 const readPMissile = (r) => ({
   id: r.u32(), type: PETAL_IDS[r.u8()], rarity: r.u8(),
@@ -194,7 +215,7 @@ const readPMissile = (r) => ({
 
 const writeDrop = (w, d) => {
   w.u32(d.id); w.u8(PETAL_IDX.get(d.type)); w.u8(d.rarity);
-  w.pos(d.x); w.pos(d.z);
+  w.pos(d.pos.x); w.pos(d.pos.z);
 };
 const readDrop = (r) => ({
   id: r.u32(), type: PETAL_IDS[r.u8()], rarity: r.u8(), x: r.pos(), z: r.pos(),
@@ -294,84 +315,248 @@ export function decodeCmd(buffer) {
   }
 }
 
-// ---- snapshot ----
+// ---- delta snapshots ----
+//
+// Frame layout (v2): header (version, flags, time, you|spec), then one
+// section per entity kind — players, mobs, missiles, pmissiles, drops —
+// each `u16 removedN, u32 ids..., u16 upsertN, records...`, then the
+// private slice (xp/inventory when dirty), others, events.
+//
+// The server keeps, per connection, which byte-exact version of every
+// entity that client has (DeltaEncoder); the client folds the deltas back
+// into full per-tick state objects (DeltaAssembler), so the render layer
+// never knows the transport changed. TCP ordering makes this safe without
+// acks; a reconnect gets fresh caches on both ends, which is a full
+// snapshot by construction.
 
-const list = (w, arr, fn) => { w.u16(arr.length); for (const item of arr) fn(w, item); };
-const readList = (r, fn) => {
-  const n = r.u16();
-  const out = [];
-  for (let i = 0; i < n; i++) out.push(fn(r));
-  return out;
+const bytesEq = (a, b) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 };
 
-export function encodeState(s) {
-  const w = new Writer();
-  w.u8(PROTOCOL_VERSION);
-  const spec = s.you == null;
-  let flags = spec ? 1 : 0;
-  if (s.xp !== undefined) flags |= 2;
-  if (s.inventory) flags |= 4;
-  w.u8(flags);
-  w.f64(s.time);
-  if (spec) {
-    w.u8(s.spec.k === 'player' ? 0 : s.spec.k === 'mob' ? 1 : 2);
-    w.u32(s.spec.id ?? 0);
-  } else {
-    w.u32(s.you);
+const VIEW_R2 = VIEW_RADIUS * VIEW_RADIUS;
+
+export class DeltaEncoder {
+  constructor() {
+    this.scratch = new Writer();
+    // id -> last serialized bytes, refreshed each tick; when an entity's
+    // bytes are unchanged the PREVIOUS array object is kept, so "did this
+    // connection already send exactly this" is a reference compare
+    this.prev = { stat: new Map(), dyn: new Map(), mobs: new Map(), missiles: new Map(), pmissiles: new Map(), drops: new Map() };
+    this.tick = null;
   }
-  list(w, s.players, writePlayer);
-  list(w, s.mobs, writeMob);
-  list(w, s.missiles, writeMissile);
-  list(w, s.pmissiles, writePMissile);
-  list(w, s.drops, writeDrop);
-  if (s.xp !== undefined) { w.f64(s.xp); w.f64(s.xpNext); }
-  if (s.inventory) {
-    w.u16(s.inventory.length);
-    for (const [key, count] of s.inventory) {
-      const [type, rarity] = key.split(':');
-      w.u8(PETAL_IDX.get(type)); w.u8(Number(rarity)); w.u16(count);
+
+  _serialize(prevMap, nextMap, id, writeFn, obj) {
+    this.scratch.at = 0;
+    writeFn(this.scratch, obj);
+    const view = this.scratch.buf.subarray(0, this.scratch.at);
+    const prev = prevMap.get(id);
+    const bytes = prev && bytesEq(prev, view) ? prev : view.slice();
+    nextMap.set(id, bytes);
+    return bytes;
+  }
+
+  // serialize every entity once, shared by all connections this tick.
+  // `players`/`mobs`/... are live server objects; drops carry an owner.
+  beginTick({ players, mobs, missiles, pmissiles, drops }) {
+    const next = { stat: new Map(), dyn: new Map(), mobs: new Map(), missiles: new Map(), pmissiles: new Map(), drops: new Map() };
+    const t = { players: [], mobs: [], missiles: [], pmissiles: [], drops: [] };
+    for (const p of players) {
+      t.players.push({
+        id: p.id, x: p.pos.x, z: p.pos.z,
+        stat: this._serialize(this.prev.stat, next.stat, p.id, writePlayerStatic, p),
+        dyn: this._serialize(this.prev.dyn, next.dyn, p.id, writePlayerDynamic, p),
+      });
     }
+    for (const m of mobs) {
+      t.mobs.push({ id: m.id, x: m.pos.x, z: m.pos.z, bytes: this._serialize(this.prev.mobs, next.mobs, m.id, writeMob, m) });
+    }
+    for (const mi of missiles) {
+      t.missiles.push({ id: mi.id, x: mi.pos.x, z: mi.pos.z, bytes: this._serialize(this.prev.missiles, next.missiles, mi.id, writeMissile, mi) });
+    }
+    for (const pm of pmissiles) {
+      t.pmissiles.push({ id: pm.id, x: pm.pos.x, z: pm.pos.z, bytes: this._serialize(this.prev.pmissiles, next.pmissiles, pm.id, writePMissile, pm) });
+    }
+    for (const d of drops) {
+      t.drops.push({ id: d.id, x: d.pos.x, z: d.pos.z, owner: d.owner, bytes: this._serialize(this.prev.drops, next.drops, d.id, writeDrop, d) });
+    }
+    this.prev = next; // dead ids fall out here
+    this.tick = t;
   }
-  if (!spec) {
-    w.u8(s.others.length);
-    for (const o of s.others) { w.str(o.name); w.pos(o.x); w.pos(o.z); }
+
+  static newCache() {
+    return { players: new Map(), mobs: new Map(), missiles: new Map(), pmissiles: new Map(), drops: new Map() };
   }
-  list(w, s.events, writeEvent);
-  return w.done();
+
+  // one section: removals (cached ids no longer visible) + upserts
+  // (visible entities whose bytes this connection hasn't sent yet)
+  _section(w, entities, cache, px, pz, writeUpsert, changed) {
+    const visible = new Map();
+    for (const e of entities) {
+      const dx = e.x - px, dz = e.z - pz;
+      if (dx * dx + dz * dz <= VIEW_R2) visible.set(e.id, e);
+    }
+    const removeAt = w.mark16();
+    let removed = 0;
+    for (const id of cache.keys()) {
+      if (!visible.has(id)) { w.u32(id); cache.delete(id); removed++; }
+    }
+    w.patch16(removeAt, removed);
+    const upsertAt = w.mark16();
+    let upserts = 0;
+    for (const e of visible.values()) {
+      if (!changed(cache.get(e.id), e)) continue;
+      writeUpsert(w, e, cache.get(e.id));
+      upserts++;
+    }
+    w.patch16(upsertAt, upserts);
+  }
+
+  encodeFor(cache, view) {
+    // view: { px, pz, you | spec, time, xp?, xpNext?, inventory?, others?, events }
+    const w = new Writer();
+    w.u8(PROTOCOL_VERSION);
+    const spec = view.you == null;
+    let flags = spec ? 1 : 0;
+    if (view.xp !== undefined) flags |= 2;
+    if (view.inventory) flags |= 4;
+    w.u8(flags);
+    w.f64(view.time);
+    if (spec) {
+      w.u8(view.spec.k === 'player' ? 0 : view.spec.k === 'mob' ? 1 : 2);
+      w.u32(view.spec.id ?? 0);
+    } else {
+      w.u32(view.you);
+    }
+
+    const { px, pz } = view;
+    this._section(w, this.tick.players, cache.players, px, pz,
+      (wr, e, sent) => {
+        const needStat = !sent || sent.stat !== e.stat;
+        wr.u32(e.id);
+        wr.u8(needStat ? 1 : 0);
+        if (needStat) wr.bytes(e.stat);
+        wr.bytes(e.dyn);
+        cache.players.set(e.id, { stat: e.stat, dyn: e.dyn });
+      },
+      (sent, e) => !sent || sent.stat !== e.stat || sent.dyn !== e.dyn);
+    const whole = (kindCache) => [
+      (wr, e) => { wr.bytes(e.bytes); kindCache.set(e.id, e.bytes); },
+      (sent, e) => sent !== e.bytes,
+    ];
+    let [up, ch] = whole(cache.mobs);
+    this._section(w, this.tick.mobs, cache.mobs, px, pz, up, ch);
+    [up, ch] = whole(cache.missiles);
+    this._section(w, this.tick.missiles, cache.missiles, px, pz, up, ch);
+    [up, ch] = whole(cache.pmissiles);
+    this._section(w, this.tick.pmissiles, cache.pmissiles, px, pz, up, ch);
+    [up, ch] = whole(cache.drops);
+    const ownDrops = spec ? [] : this.tick.drops.filter((d) => d.owner === view.you);
+    this._section(w, ownDrops, cache.drops, px, pz, up, ch);
+
+    if (view.xp !== undefined) { w.f64(view.xp); w.f64(view.xpNext); }
+    if (view.inventory) {
+      w.u16(view.inventory.length);
+      for (const [key, count] of view.inventory) {
+        const [type, rarity] = key.split(':');
+        w.u8(PETAL_IDX.get(type)); w.u8(Number(rarity)); w.u16(count);
+      }
+    }
+    if (!spec) {
+      w.u8(view.others.length);
+      for (const o of view.others) { w.str(o.name); w.pos(o.x); w.pos(o.z); }
+    }
+    w.u16(view.events.length);
+    for (const ev of view.events) writeEvent(w, ev);
+    return w.done();
+  }
 }
 
-export function decodeState(buffer) {
-  const r = new Reader(buffer);
-  const version = r.u8();
-  if (version !== PROTOCOL_VERSION) throw new Error(`protocol mismatch: ${version} != ${PROTOCOL_VERSION}`);
-  const flags = r.u8();
-  const s = { t: 'state', time: r.f64() };
-  if (flags & 1) {
-    const k = r.u8();
-    s.you = null;
-    s.spec = { k: k === 0 ? 'player' : k === 1 ? 'mob' : null, id: r.u32() || null };
-  } else {
-    s.you = r.u32();
+// Client side: folds delta frames back into the full state-object shape
+// the pre-delta protocol delivered, so EntitySync/UI code is unchanged.
+// Create a fresh assembler per websocket connection — the server's caches
+// for a new connection are empty, so the first frame is a full snapshot.
+export class DeltaAssembler {
+  constructor() {
+    this.players = new Map(); // id -> merged player object (+ petal comp)
+    this.mobs = new Map();
+    this.missiles = new Map();
+    this.pmissiles = new Map();
+    this.drops = new Map();
   }
-  s.players = readList(r, readPlayer);
-  s.mobs = readList(r, readMob);
-  s.missiles = readList(r, readMissile);
-  s.pmissiles = readList(r, readPMissile);
-  s.drops = readList(r, readDrop);
-  if (flags & 2) { s.xp = r.f64(); s.xpNext = r.f64(); }
-  if (flags & 4) {
-    const n = r.u16();
-    s.inventory = [];
-    for (let i = 0; i < n; i++) {
-      const type = PETAL_IDS[r.u8()], rarity = r.u8(), count = r.u16();
-      s.inventory.push([`${type}:${rarity}`, count]);
+
+  _applySection(r, map, readRecord) {
+    const removedN = r.u16();
+    for (let i = 0; i < removedN; i++) map.delete(r.u32());
+    const upsertN = r.u16();
+    for (let i = 0; i < upsertN; i++) readRecord();
+  }
+
+  apply(buffer) {
+    const r = new Reader(buffer);
+    const version = r.u8();
+    if (version !== PROTOCOL_VERSION) throw new Error(`protocol mismatch: ${version} != ${PROTOCOL_VERSION}`);
+    const flags = r.u8();
+    const s = { t: 'state', time: r.f64() };
+    if (flags & 1) {
+      const k = r.u8();
+      s.you = null;
+      s.spec = { k: k === 0 ? 'player' : k === 1 ? 'mob' : null, id: r.u32() || null };
+    } else {
+      s.you = r.u32();
     }
+
+    this._applySection(r, this.players, () => {
+      const id = r.u32();
+      const hasStatic = r.u8() === 1;
+      let p = this.players.get(id);
+      if (!p) { p = { id, petals: {} }; this.players.set(id, p); }
+      if (hasStatic) {
+        const st = readPlayerStatic(r);
+        p.name = st.name; p.level = st.level; p.maxHp = st.maxHp;
+        p.petals.rotFactor = st.rotFactor;
+        p.petals.primary = st.primary;
+        p.petals.secondary = st.secondary;
+        p.comp = st.comp;
+      }
+      const d = readPlayerDynamic(r);
+      p.x = d.x; p.z = d.z; p.facing = d.facing; p.hp = d.hp;
+      p.dead = d.dead; p.deadTimer = d.deadTimer; p.imm = d.imm;
+      // dynamic petal state rides positionally over the static composition
+      p.petals.instances = d.inst.map((di, i) => {
+        const def = p.comp?.[i] ?? {};
+        return { id: def.id, slot: def.slot, type: def.type, rarity: def.rarity, ...di };
+      });
+    });
+    this._applySection(r, this.mobs, () => { const m = readMob(r); this.mobs.set(m.id, m); });
+    this._applySection(r, this.missiles, () => { const m = readMissile(r); this.missiles.set(m.id, m); });
+    this._applySection(r, this.pmissiles, () => { const m = readPMissile(r); this.pmissiles.set(m.id, m); });
+    this._applySection(r, this.drops, () => { const d = readDrop(r); this.drops.set(d.id, d); });
+
+    s.players = [...this.players.values()];
+    s.mobs = [...this.mobs.values()];
+    s.missiles = [...this.missiles.values()];
+    s.pmissiles = [...this.pmissiles.values()];
+    s.drops = [...this.drops.values()];
+
+    if (flags & 2) { s.xp = r.f64(); s.xpNext = r.f64(); }
+    if (flags & 4) {
+      const n = r.u16();
+      s.inventory = [];
+      for (let i = 0; i < n; i++) {
+        const type = PETAL_IDS[r.u8()], rarity = r.u8(), count = r.u16();
+        s.inventory.push([`${type}:${rarity}`, count]);
+      }
+    }
+    if (!(flags & 1)) {
+      const n = r.u8();
+      s.others = [];
+      for (let i = 0; i < n; i++) s.others.push({ name: r.str(), x: r.pos(), z: r.pos() });
+    }
+    const evN = r.u16();
+    s.events = [];
+    for (let i = 0; i < evN; i++) s.events.push(readEvent(r));
+    return s;
   }
-  if (!(flags & 1)) {
-    const n = r.u8();
-    s.others = [];
-    for (let i = 0; i < n; i++) s.others.push({ name: r.str(), x: r.pos(), z: r.pos() });
-  }
-  s.events = readList(r, readEvent);
-  return s;
 }

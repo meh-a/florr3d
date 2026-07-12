@@ -8,7 +8,7 @@
 // (attached to the vite server in dev, server/index.js standalone), and if
 // the very first connection attempt fails — e.g. a static deploy like GitHub
 // Pages — it falls back to running the same server sim in a Web Worker.
-import { decodeState, encodeCmd } from '../../shared/protocol.js';
+import { DeltaAssembler, encodeCmd } from '../../shared/protocol.js';
 
 const DEDICATED_URL = import.meta.env.VITE_WS_URL;
 
@@ -28,6 +28,10 @@ export class Net {
     const ws = new WebSocket(DEDICATED_URL || `${proto}://${location.host}/ws`);
     ws.binaryType = 'arraybuffer'; // snapshots arrive as binary frames
     this.ws = ws;
+    // snapshots are deltas against what this connection has already
+    // received — a new connection means the server starts from scratch,
+    // so the assembler must too
+    const assembler = new DeltaAssembler();
     let opened = false;
     ws.onopen = () => {
       opened = true;
@@ -41,7 +45,7 @@ export class Net {
     ws.onmessage = (ev) => {
       // binary frame = state snapshot; text frames = rare control messages
       if (ev.data instanceof ArrayBuffer) {
-        try { this.onState(decodeState(ev.data)); } catch (err) { console.error('bad state frame', err); }
+        try { this.onState(assembler.apply(ev.data)); } catch (err) { console.error('bad state frame', err); }
         return;
       }
       let msg;

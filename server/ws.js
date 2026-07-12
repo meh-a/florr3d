@@ -1,5 +1,5 @@
 import { WebSocketServer } from 'ws';
-import { encodeState, decodeCmd } from '../shared/protocol.js';
+import { DeltaEncoder, decodeCmd } from '../shared/protocol.js';
 import { World } from './world.js';
 import { sessionFromCookie } from './auth.js';
 import { loadSave, writeSave } from './db.js';
@@ -88,17 +88,19 @@ export function attachGameServer(httpServer, path = '/ws') {
   // build vs serialize+send — so optimization targets are measured, not
   // guessed. A tick budget is TICK_MS; sustained avg near it means the
   // core is saturating.
-  const perf = { n: 0, sim: 0, build: 0, send: 0, max: 0 };
+  const perf = { n: 0, sim: 0, build: 0, send: 0, max: 0, bytes: 0 };
   setInterval(() => {
     if (perf.n === 0) return;
     const ms = (v) => (v / perf.n).toFixed(1);
     console.log(`[tick] players=${world.players.size} spectators=${spectators.size} ` +
       `avg=${ms(perf.sim + perf.build + perf.send)}ms ` +
       `(sim=${ms(perf.sim)} build=${ms(perf.build)} send=${ms(perf.send)}) ` +
-      `max=${perf.max.toFixed(1)}ms of ${TICK_MS.toFixed(1)}ms budget`);
-    perf.n = perf.sim = perf.build = perf.send = perf.max = 0;
+      `max=${perf.max.toFixed(1)}ms of ${TICK_MS.toFixed(1)}ms budget ` +
+      `out=${(perf.bytes / perf.n / 1024).toFixed(1)}KB/tick`);
+    perf.n = perf.sim = perf.build = perf.send = perf.max = perf.bytes = 0;
   }, 60_000);
 
+  const encoder = new DeltaEncoder();
   let last = performance.now();
   setInterval(() => {
     const now = performance.now();
@@ -116,15 +118,21 @@ export function attachGameServer(httpServer, path = '/ws') {
       spec.target = world.spectateTarget(spec.target);
       specViews.push({ key: spec.key, ...spec.target });
     }
-    const snapshots = world.buildSnapshots(specViews);
+    const { entities, views } = world.buildTick(specViews);
+    encoder.beginTick(entities);
     const t2 = performance.now();
-    const deliver = (ws, snapshot) => {
-      if (ws.readyState !== ws.OPEN) return;
+    const deliver = (ws, view) => {
+      if (!view || ws.readyState !== ws.OPEN) return;
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; }
-      ws.send(encodeState(snapshot)); // binary frame; control messages stay JSON text
+      // per-connection delta cache: what this client already has. Encoding
+      // mutates it, so only encode when we're actually going to send.
+      ws.deltaCache ??= DeltaEncoder.newCache();
+      const frame = encoder.encodeFor(ws.deltaCache, view);
+      perf.bytes += frame.length;
+      ws.send(frame); // binary frame; control messages stay JSON text
     };
-    for (const [playerId, ws] of sockets) deliver(ws, snapshots.get(playerId));
-    for (const [ws, spec] of spectators) deliver(ws, snapshots.get(spec.key));
+    for (const [playerId, ws] of sockets) deliver(ws, views.get(playerId));
+    for (const [ws, spec] of spectators) deliver(ws, views.get(spec.key));
     const t3 = performance.now();
     perf.n++;
     perf.sim += t1 - t0;

@@ -130,12 +130,73 @@ export class World {
     updateCombat(this, dt);
   }
 
+  // Per-tick data for the delta wire protocol (ws.js): the live entity
+  // lists (DeltaEncoder serializes each once, shared by all connections)
+  // plus one lightweight view per recipient — position for interest
+  // scoping, identity, nearest-player arrows, private slice, and events.
+  // Flushes all one-shot events, so run either this OR buildSnapshots per
+  // tick, never both (the worker uses buildSnapshots).
+  buildTick(spectators = []) {
+    const r2c = r2; // alias for closures below
+    const posEvents = this.events.filter((ev) => typeof ev.x === 'number');
+    const globalEvents = this.events.filter((ev) => typeof ev.x !== 'number');
+    const R2 = VIEW_RADIUS * VIEW_RADIUS;
+    const nearEvents = (px, pz) =>
+      posEvents.filter((ev) => (ev.x - px) ** 2 + (ev.z - pz) ** 2 <= R2);
+
+    const players = [...this.players.values()];
+    const entities = {
+      players,
+      mobs: this.mobs.mobs,
+      missiles: this.mobs.missiles,
+      pmissiles: players.flatMap((p) => p.petals.projectiles),
+      drops: this.drops.drops,
+    };
+
+    const alive = players.filter((pl) => !pl.dead);
+    const views = new Map();
+    for (const p of players) {
+      const px = p.pos.x, pz = p.pos.z;
+      const others = alive
+        .filter((o) => o.id !== p.id)
+        .map((o) => ({ o, d: (o.pos.x - px) ** 2 + (o.pos.z - pz) ** 2 }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 3)
+        .map(({ o }) => ({ name: o.name, x: r2c(o.pos.x), z: r2c(o.pos.z) }));
+      const view = {
+        px, pz, you: p.id, time: r2c(this.time), others,
+        events: [...globalEvents, ...nearEvents(px, pz), ...p.events],
+      };
+      if (p.xpDirty) {
+        view.xp = Math.floor(p.xp);
+        view.xpNext = p.xpForNext();
+        p.xpDirty = false;
+      }
+      if (p.invDirty) {
+        view.inventory = [...p.inventory.entries()];
+        p.invDirty = false;
+      }
+      views.set(p.id, view);
+    }
+    for (const s of spectators) {
+      views.set(s.key, {
+        px: s.x, pz: s.z, you: null, spec: { k: s.k, id: s.id },
+        time: r2c(this.time),
+        events: [...globalEvents, ...nearEvents(s.x, s.z)],
+      });
+    }
+    this.events = [];
+    for (const p of players) p.events = [];
+    return { entities, views };
+  }
+
   // Build one snapshot per player. Entity entries are serialized once and
   // shared; each recipient then gets only the entities within VIEW_RADIUS
   // of their own player (interest management — everything farther is deep
   // in the fog and off-camera anyway), plus a private slice — their own
   // inventory, xp, and toasts — which must never be sent to anyone else.
-  // Flushes all one-shot events.
+  // Flushes all one-shot events. Only the in-browser worker uses this
+  // full-snapshot path; the websocket server uses buildTick + DeltaEncoder.
   //
   // `spectators` is a list of { key, k, id, x, z } views for connections
   // that haven't joined yet (name gate): each gets a snapshot scoped around
