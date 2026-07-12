@@ -102,6 +102,7 @@ export function attachGameServer(httpServer, path = '/ws') {
 
   const encoder = new DeltaEncoder();
   let last = performance.now();
+  let tickNo = 0;
   setInterval(() => {
     const now = performance.now();
     // clamp like the old client loop so a stalled event loop can't
@@ -113,10 +114,16 @@ export function attachGameServer(httpServer, path = '/ws') {
     const t0 = performance.now();
     world.tick(dt);
     const t1 = performance.now();
+    // spectators (name-gate menu views) get frames at half rate — the
+    // client widens its motion smoothing to match, and menu viewers don't
+    // need one-shot events (some fall on skipped ticks) or 20Hz latency
+    const specTick = ++tickNo % 2 === 0;
     const specViews = [];
-    for (const spec of spectators.values()) {
-      spec.target = world.spectateTarget(spec.target);
-      specViews.push({ key: spec.key, ...spec.target });
+    if (specTick) {
+      for (const spec of spectators.values()) {
+        spec.target = world.spectateTarget(spec.target);
+        specViews.push({ key: spec.key, ...spec.target });
+      }
     }
     const { entities, views } = world.buildTick(specViews);
     encoder.beginTick(entities);
@@ -132,7 +139,7 @@ export function attachGameServer(httpServer, path = '/ws') {
       ws.send(frame); // binary frame; control messages stay JSON text
     };
     for (const [playerId, ws] of sockets) deliver(ws, views.get(playerId));
-    for (const [ws, spec] of spectators) deliver(ws, views.get(spec.key));
+    if (specTick) for (const [ws, spec] of spectators) deliver(ws, views.get(spec.key));
     const t3 = performance.now();
     perf.n++;
     perf.sim += t1 - t0;

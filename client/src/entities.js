@@ -354,12 +354,15 @@ export class EntitySync {
 
   update(dt) {
     const playerDead = this.state?.player?.dead ?? false;
+    // spectator (name-gate) snapshots arrive at half rate, so soften every
+    // motion lerp to bridge the wider gaps — same visual speed, no stepping
+    const sm = this.state?.you == null ? 0.55 : 1;
 
     // hidden while spectating; the camera sits inside the flower in first person
     this.playerMesh.visible = !!this.state?.player && !playerDead && !this.game.fpsMode;
-    this.playerMesh.position.lerp(this.playerTarget, damp(14, dt));
+    this.playerMesh.position.lerp(this.playerTarget, damp(14 * sm, dt));
     const targetQ = new THREE.Quaternion().setFromAxisAngle(UP, this.playerFacing);
-    this.playerMesh.quaternion.slerp(targetQ, damp(8, dt));
+    this.playerMesh.quaternion.slerp(targetQ, damp(8 * sm, dt));
     updateFlash(this.playerMesh);
     updateImmuneLook(this.playerMesh);
 
@@ -368,9 +371,9 @@ export class EntitySync {
       v.mesh.visible = visible;
       v.hpBar.mesh.visible = visible;
       v.nameSprite.visible = visible;
-      v.mesh.position.lerp(v.target, damp(14, dt));
+      v.mesh.position.lerp(v.target, damp(14 * sm, dt));
       const q = new THREE.Quaternion().setFromAxisAngle(UP, v.facing);
-      v.mesh.quaternion.slerp(q, damp(8, dt));
+      v.mesh.quaternion.slerp(q, damp(8 * sm, dt));
       updateFlash(v.mesh);
       updateImmuneLook(v.mesh);
 
@@ -389,9 +392,9 @@ export class EntitySync {
     }
 
     for (const v of this.mobs.values()) {
-      v.mesh.position.lerp(v.target, damp(10, dt));
+      v.mesh.position.lerp(v.target, damp(10 * sm, dt));
       const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(v.pitch || 0, v.facing, 0, 'YXZ'));
-      v.mesh.quaternion.slerp(q, damp(6, dt));
+      v.mesh.quaternion.slerp(q, damp(6 * sm, dt));
       updateFlash(v.mesh);
 
       const wings = v.mesh.userData.wingPivots;
@@ -427,16 +430,16 @@ export class EntitySync {
     for (const v of this.petals.values()) {
       v.mesh.visible = v.alive && !v.ownerDead;
       if (!v.mesh.visible) continue;
-      v.mesh.position.lerp(new THREE.Vector3(v.target.x, 1.1, v.target.z), damp(12, dt));
+      v.mesh.position.lerp(new THREE.Vector3(v.target.x, 1.1, v.target.z), damp(12 * sm, dt));
       v.mesh.rotation.y += dt * 1.5;
     }
 
     for (const v of this.missiles.values()) {
-      v.mesh.position.lerp(v.target, damp(16, dt));
+      v.mesh.position.lerp(v.target, damp(16 * sm, dt));
     }
 
     for (const v of this.pmissiles.values()) {
-      v.mesh.position.lerp(v.target, damp(16, dt));
+      v.mesh.position.lerp(v.target, damp(16 * sm, dt));
     }
 
     for (const v of this.drops.values()) {
