@@ -62,11 +62,25 @@ function ensureWidget() {
 export async function getTurnstileToken() {
   await ensureWidget();
   if (widgetId === null) return '';
-  return Promise.race([
-    new Promise((resolve) => {
-      pending.push((token) => resolve(token || ''));
-      window.turnstile.execute(widgetId);
-    }),
-    new Promise((resolve) => setTimeout(() => resolve(''), 15000)),
-  ]);
+
+  // the container is display:none the rest of the time (see index.html) —
+  // only show it for the actual verification window, and always hide it
+  // again after (success, failure, or timeout), so a solved/expired
+  // widget can never linger on screen over gameplay
+  const container = document.getElementById('turnstile-container');
+  container.classList.add('active');
+  try {
+    return await Promise.race([
+      new Promise((resolve) => {
+        pending.push((token) => resolve(token || ''));
+        window.turnstile.execute(widgetId);
+      }),
+      new Promise((resolve) => setTimeout(() => resolve(''), 15000)),
+    ]);
+  } finally {
+    container.classList.remove('active');
+    // clears solved/expired state so the NEXT execute() (a future session
+    // needing a fresh check) starts clean instead of showing stale UI
+    window.turnstile.reset(widgetId);
+  }
 }

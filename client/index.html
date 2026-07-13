@@ -148,8 +148,13 @@
     /* name gate: shown once on load, before the flower gets a name */
     /* fixed, always on top of the name gate — see the HTML comment above
        its markup for why this must never live inside #namegate */
-    #turnstile-container { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-                            z-index: 50; }
+    /* hidden by default — turnstile.js only adds .active while a
+       verification is actually in flight, and removes it the moment one
+       finishes (success or not), so a solved/expired widget never lingers
+       on screen over gameplay */
+    #turnstile-container { display: none; position: fixed; top: 50%; left: 50%;
+                            transform: translate(-50%, -50%); z-index: 50; }
+    #turnstile-container.active { display: block; }
     #namegate { position: absolute; inset: 0; background: rgba(0,0,0,0.45); display: flex;
                 align-items: center; justify-content: center; flex-direction: column; gap: 14px; }
     #namegate.hidden { display: none; }
