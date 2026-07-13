@@ -2,6 +2,8 @@ import { defineConfig } from 'vite';
 import { attachGameServer } from './server/ws.js';
 import { handleAuth } from './server/auth.js';
 import { mapPayload } from './server/map.js';
+import { mintJoinToken } from './server/jointoken.js';
+import { clientIp } from './server/utils.js';
 
 // The authoritative game server piggybacks on vite's http server in dev and
 // preview, so `npm run dev` is all you need. server/index.js runs it standalone.
@@ -17,7 +19,14 @@ const attachMap = (server) => server.middlewares.use((req, res, next) => {
   res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' });
   res.end(JSON.stringify(mapPayload));
 });
-const attach = (server) => { attachGameServer(server.httpServer); attachAuth(server); attachMap(server); };
+const attachJoinToken = (server) => server.middlewares.use((req, res, next) => {
+  if (new URL(req.url, 'http://localhost').pathname !== '/join-token') return next();
+  res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+  res.end(JSON.stringify({ token: mintJoinToken(clientIp(req)) }));
+});
+const attach = (server) => {
+  attachGameServer(server.httpServer); attachAuth(server); attachMap(server); attachJoinToken(server);
+};
 const gameServerPlugin = {
   name: 'florr3d-game-server',
   configureServer: attach,

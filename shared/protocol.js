@@ -17,7 +17,7 @@ import { PETAL_TYPES, MOB_TYPES, VIEW_RADIUS } from './config.js';
 // PROTOCOL_VERSION guards across builds: on mismatch the decoder throws,
 // and the deploy auto-reload flow gets clients onto the matching build.
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 const PETAL_IDS = Object.keys(PETAL_TYPES);
 const MOB_IDS = Object.keys(MOB_TYPES);
@@ -252,6 +252,7 @@ export function encodeCmd(msg) {
   switch (msg.t) {
     case 'join':
       w.str(msg.name);
+      w.str(msg.token || '');
       break;
     case 'input':
       w.f32(msg.tx); w.f32(msg.tz);
@@ -288,7 +289,7 @@ export function decodeCmd(buffer) {
   const t = CMD_NAMES[r.u8()];
   switch (t) {
     case 'join':
-      return { t, name: r.str() };
+      return { t, name: r.str(), token: r.str() };
     case 'input': {
       const msg = { t, tx: r.f32(), tz: r.f32(), ax: r.f32(), az: r.f32(), yaw: r.f32() };
       const flags = r.u8();

@@ -2,9 +2,11 @@ import { WebSocketServer } from 'ws';
 import { DeltaEncoder, decodeCmd } from '../shared/protocol.js';
 import { Governor } from './governor.js';
 import { isBannedName } from './censor.js';
+import { verifyJoinToken } from './jointoken.js';
 import { World } from './world.js';
 import { sessionFromCookie } from './auth.js';
 import { loadSave, writeSave } from './db.js';
+import { clientIp } from './utils.js';
 
 // 20Hz: at 40+ players the per-tick serialize+deflate work saturated the
 // VM's single core at 30Hz (late ticks -> ping spikes -> the dead-peer
@@ -59,13 +61,6 @@ export function attachGameServer(httpServer, path = '/ws') {
   const accounts = new Map();   // playerId -> accountId, for logged-in players
   const ipCounts = new Map();   // client ip -> open connection count
   let nextSpecKey = 1;
-
-  // Caddy fronts the game in production, so the peer address is always
-  // localhost — the real client is the first X-Forwarded-For hop. In dev
-  // there's no proxy and the socket address is the client itself.
-  const clientIp = (req) =>
-    req.headers['x-forwarded-for']?.split(',')[0].trim()
-    || req.socket.remoteAddress;
 
   // periodic safety net; the authoritative save happens on disconnect
   setInterval(() => {
@@ -219,6 +214,13 @@ export function attachGameServer(httpServer, path = '/ws') {
       if (!player) {
         // spectators have exactly one valid intent: joining the world
         if (msg?.t === 'join') {
+          // proof this join came from a real page load (see jointoken.js) —
+          // the primary defense against flood scripts, which never have a
+          // token to send. Silent refusal: no signal about why it failed.
+          if (!verifyJoinToken(msg.token, ip)) {
+            console.log(`[jointoken] rejected ip=${ip}`);
+            return;
+          }
           // hard name ban (bot swarms): refuse the join and log the ip so
           // it can be firewalled. The connection stays open as a spectator
           // — no feedback that tells the bot which name tripped the filter.

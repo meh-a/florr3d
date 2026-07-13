@@ -19,7 +19,7 @@ export class Player {
   constructor(world) {
     this.world = world;
     this.id = uid();
-    this.name = 'Flower';
+    this.name = 'Guest';
     this.input = { tx: 0, tz: 0, ax: 0, az: 0, fps: false, yaw: 0, atk: false, def: false };
     this.inventory = new Map(); // "type:rarity" -> count
     this.events = []; // private one-shot events (toasts), flushed per snapshot

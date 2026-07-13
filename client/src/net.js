@@ -83,4 +83,20 @@ export class Net {
     if (this.worker) this.worker.postMessage(obj);
     else if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(encodeCmd(obj));
   }
+
+  // `join` needs a fresh, short-lived proof-of-page-load token (see
+  // server/jointoken.js) — fetched right before sending rather than once
+  // at boot, since its ~45s TTL wouldn't survive someone idling on the
+  // name gate. The worker (offline) path has no server to check it, so it
+  // skips the fetch entirely.
+  async sendJoin(name) {
+    let token = '';
+    if (!this.worker) {
+      try {
+        const res = await fetch('/join-token');
+        if (res.ok) ({ token } = await res.json());
+      } catch { /* offline/dev without the route — server will just refuse */ }
+    }
+    this.send({ t: 'join', name, token });
+  }
 }

@@ -232,7 +232,7 @@ export class EntitySync {
       view.nameSprite.material.dispose();
     }
     view.name = name;
-    view.nameSprite = makeNameSprite(name || 'Flower');
+    view.nameSprite = makeNameSprite(name || 'Guest');
     this.game.scene.add(view.nameSprite);
   }
 

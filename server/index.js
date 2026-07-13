@@ -11,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { attachGameServer } from './ws.js';
 import { handleAuth } from './auth.js';
 import { mapPayload } from './map.js';
+import { mintJoinToken } from './jointoken.js';
+import { clientIp } from './utils.js';
 
 const DIST = fileURLToPath(new URL('../dist', import.meta.url));
 const MIME = {
@@ -29,6 +31,12 @@ const server = http.createServer(async (req, res) => {
     if (!mapPayload) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' });
     res.end(JSON.stringify(mapPayload));
+    return;
+  }
+  // minted fresh per request — never cache
+  if (pathname === '/join-token') {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify({ token: mintJoinToken(clientIp(req)) }));
     return;
   }
   // resolve inside dist/ only; normalize() defuses ../ traversal

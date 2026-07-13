@@ -63,14 +63,14 @@ Promise.all([
       // a (re)connect is a brand-new server-side player, so the name has
       // to be (re)introduced every time the transport comes up
       if ((mode === 'online' || mode === 'local') && chosenName) {
-        game.net.send({ t: 'join', name: chosenName });
+        game.net.sendJoin(chosenName);
       }
       // join refused under critical server load: keep spectating and retry
       // quietly until a slot opens (load sheds fast once the wave passes)
       if (mode === 'full' && chosenName) {
         setTimeout(() => {
           if (chosenName && game.entities.state?.you == null) {
-            game.net.send({ t: 'join', name: chosenName });
+            game.net.sendJoin(chosenName);
           }
         }, 8000);
       }
@@ -91,9 +91,9 @@ Promise.all([
   nameInput.value = localStorage.getItem('playerName') || '';
   nameInput.focus();
   const submitName = () => {
-    chosenName = nameInput.value.trim().slice(0, 16) || 'Flower';
+    chosenName = nameInput.value.trim().slice(0, 16) || 'Guest';
     localStorage.setItem('playerName', chosenName);
-    game.net.send({ t: 'join', name: chosenName });
+    game.net.sendJoin(chosenName);
     gate.classList.add('hidden');
     nameInput.blur();
   };

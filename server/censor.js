@@ -45,6 +45,7 @@ export function censorName(name) {
 // normalized form, so spacing/leet variants ("D M C A   B0T") still catch.
 const NAME_BANS = [
   'dmcabot',
+  'flower',
 ];
 
 export function isBannedName(name) {
