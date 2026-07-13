@@ -7,3 +7,4 @@ accounts.db*
 client/assets-src/
 map.json
 tools/_drive-map-builder.mjs
+keys.txt
