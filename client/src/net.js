@@ -96,6 +96,12 @@ export class Net {
   // `human` cookie yet, so solve Turnstile once and retry with it. Most
   // reconnects never see the 403 — the cookie from the first join covers
   // the whole session.
+  // Resolves true once the join was actually sent (verification cleared,
+  // or there was nothing to verify), false if it was refused. Callers that
+  // gate UI on this (main.js's Play button) MUST await it and keep the
+  // player informed while it's pending — resolving/hiding anything before
+  // this settles is exactly what let players click through and land stuck
+  // as spectators while a Turnstile check was still outstanding.
   async sendJoin(name) {
     let token = '';
     if (!this.worker) {
@@ -107,11 +113,12 @@ export class Net {
           // still refused after presenting (or failing to get) a Turnstile
           // token: tell the caller so it can surface something instead of
           // silently leaving the player stuck spectating
-          if (!res.ok) { this.onStatus?.('blocked'); return; }
+          if (!res.ok) { this.onStatus?.('blocked'); return false; }
         }
         if (res.ok) ({ token } = await res.json());
-      } catch { /* offline/dev without the route — server will just refuse */ }
+      } catch { /* offline/dev without the route — best effort, still attempt */ }
     }
     this.send({ t: 'join', name, token });
+    return true;
   }
 }

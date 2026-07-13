@@ -92,17 +92,36 @@ Promise.all([
   // name gate: pick a display name once, remember it for next visit
   const gate = document.getElementById('namegate');
   const nameInput = document.getElementById('nameinput');
+  const playBtn = document.getElementById('playbtn');
   let chosenName = null;
+  let joining = false; // ignore repeat clicks while a join attempt is in flight
   nameInput.value = localStorage.getItem('playerName') || '';
   nameInput.focus();
-  const submitName = () => {
+  // The gate must stay up (and Play disabled) until sendJoin actually
+  // settles: it can be waiting on a Turnstile check that needs the player
+  // to see and click something. Hiding the gate the instant Play is
+  // pressed — the old behavior — let players click straight through a
+  // still-pending check and land stuck spectating with no idea why.
+  const submitName = async () => {
+    if (joining) return;
+    joining = true;
     chosenName = nameInput.value.trim().slice(0, 16) || 'Guest';
     localStorage.setItem('playerName', chosenName);
-    game.net.sendJoin(chosenName);
-    gate.classList.add('hidden');
+    playBtn.disabled = true;
+    playBtn.textContent = 'Verifying…';
     nameInput.blur();
+    const ok = await game.net.sendJoin(chosenName);
+    joining = false;
+    if (ok) {
+      gate.classList.add('hidden');
+    } else {
+      // sendJoin already toasted why (see onStatus's 'blocked' case) —
+      // restore the gate so the player can see it and retry
+      playBtn.disabled = false;
+      playBtn.textContent = 'Play';
+    }
   };
-  document.getElementById('playbtn').addEventListener('click', submitName);
+  playBtn.addEventListener('click', submitName);
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitName(); });
 
   // account state on the gate: logged in -> progress persists; the button
