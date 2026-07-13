@@ -9,9 +9,11 @@ import { readFile } from 'node:fs/promises';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { attachGameServer } from './ws.js';
-import { handleAuth } from './auth.js';
+import { handleAuth, parseCookies } from './auth.js';
 import { mapPayload } from './map.js';
 import { mintJoinToken } from './jointoken.js';
+import { verifyTurnstile, turnstileConfigured, TURNSTILE_SITE_KEY } from './turnstile.js';
+import { makeHumanCookie, verifyHumanCookie, HUMAN_TTL_MS } from './human.js';
 import { clientIp } from './utils.js';
 
 const DIST = fileURLToPath(new URL('../dist', import.meta.url));
@@ -33,10 +35,26 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify(mapPayload));
     return;
   }
-  // minted fresh per request — never cache
-  if (pathname === '/join-token') {
+  if (pathname === '/turnstile-sitekey') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    res.end(JSON.stringify({ token: mintJoinToken(clientIp(req)) }));
+    res.end(JSON.stringify({ siteKey: TURNSTILE_SITE_KEY }));
+    return;
+  }
+  // minted fresh per request — never cache. Gated behind Turnstile: a
+  // connection either already holds a valid `human` cookie (passed once
+  // this session) or must present a fresh Turnstile response token; only
+  // then does it get a join-token at all.
+  if (pathname === '/join-token') {
+    const ip = clientIp(req);
+    if (turnstileConfigured() && !verifyHumanCookie(parseCookies(req.headers.cookie).human, ip)) {
+      const url = new URL(req.url, 'http://localhost');
+      const ok = await verifyTurnstile(url.searchParams.get('turnstile'), ip);
+      if (!ok) { res.writeHead(403, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'human-check-required' })); return; }
+      res.setHeader('Set-Cookie',
+        `human=${makeHumanCookie(ip)}; Path=/; Max-Age=${HUMAN_TTL_MS / 1000}; HttpOnly; Secure; SameSite=Lax`);
+    }
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify({ token: mintJoinToken(ip) }));
     return;
   }
   // resolve inside dist/ only; normalize() defuses ../ traversal

@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@500;700&display=swap" rel="stylesheet" />
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #1ea761; }
@@ -226,6 +227,10 @@
         <input id="nameinput" maxlength="16" placeholder="Guest" autocomplete="off" />
         <button id="playbtn">Play</button>
       </div>
+      <!-- Cloudflare Turnstile renders here only when a fresh human-check is
+           actually requested (see client/src/turnstile.js) — invisible for
+           most players, an inline checkbox/challenge for the rest -->
+      <div id="turnstile-container"></div>
       <div id="authrow">
         <a id="loginbtn" class="hidden" href="/auth/discord">Sign in with Discord</a>
         <span id="authstate" class="stroke"></span>

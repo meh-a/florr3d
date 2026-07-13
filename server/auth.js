@@ -42,7 +42,7 @@ function verifySession(token) {
   return Number(accountId);
 }
 
-function parseCookies(header) {
+export function parseCookies(header) {
   const out = {};
   for (const part of (header || '').split(';')) {
     const i = part.indexOf('=');

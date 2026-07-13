@@ -9,6 +9,7 @@
 // the very first connection attempt fails — e.g. a static deploy like GitHub
 // Pages — it falls back to running the same server sim in a Web Worker.
 import { DeltaAssembler, encodeCmd } from '../../shared/protocol.js';
+import { getTurnstileToken } from './turnstile.js';
 
 const DEDICATED_URL = import.meta.env.VITE_WS_URL;
 
@@ -89,11 +90,21 @@ export class Net {
   // at boot, since its ~45s TTL wouldn't survive someone idling on the
   // name gate. The worker (offline) path has no server to check it, so it
   // skips the fetch entirely.
+  //
+  // The server may also require a human-check (Turnstile) before it'll
+  // mint a token at all: a 403 means this connection doesn't have the
+  // `human` cookie yet, so solve Turnstile once and retry with it. Most
+  // reconnects never see the 403 — the cookie from the first join covers
+  // the whole session.
   async sendJoin(name) {
     let token = '';
     if (!this.worker) {
       try {
-        const res = await fetch('/join-token');
+        let res = await fetch('/join-token', { credentials: 'same-origin' });
+        if (res.status === 403) {
+          const turnstile = await getTurnstileToken();
+          res = await fetch(`/join-token?turnstile=${encodeURIComponent(turnstile)}`, { credentials: 'same-origin' });
+        }
         if (res.ok) ({ token } = await res.json());
       } catch { /* offline/dev without the route — server will just refuse */ }
     }
