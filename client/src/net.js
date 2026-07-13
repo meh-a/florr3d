@@ -104,6 +104,10 @@ export class Net {
         if (res.status === 403) {
           const turnstile = await getTurnstileToken();
           res = await fetch(`/join-token?turnstile=${encodeURIComponent(turnstile)}`, { credentials: 'same-origin' });
+          // still refused after presenting (or failing to get) a Turnstile
+          // token: tell the caller so it can surface something instead of
+          // silently leaving the player stuck spectating
+          if (!res.ok) { this.onStatus?.('blocked'); return; }
         }
         if (res.ok) ({ token } = await res.json());
       } catch { /* offline/dev without the route — server will just refuse */ }

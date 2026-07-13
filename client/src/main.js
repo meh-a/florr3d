@@ -65,6 +65,10 @@ Promise.all([
       if ((mode === 'online' || mode === 'local') && chosenName) {
         game.net.sendJoin(chosenName);
       }
+      // couldn't clear the human-check (script blocked, verification
+      // failed) — bring the name gate back so the player can see the
+      // toast and retry, instead of being stuck an invisible spectator
+      if (mode === 'blocked') gate.classList.remove('hidden');
       // join refused under critical server load: keep spectating and retry
       // quietly until a slot opens (load sheds fast once the wave passes)
       if (mode === 'full' && chosenName) {
@@ -80,6 +84,7 @@ Promise.all([
         local: 'No server found — running locally',
         updating: 'Updating…',
         full: 'Server is packed right now — you\'re in line, hang tight…',
+        blocked: 'Couldn\'t verify you\'re human — disable ad blockers for this site and hit Play again',
       }[mode]);
     },
   });

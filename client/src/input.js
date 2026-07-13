@@ -1,6 +1,16 @@
 import * as THREE from 'three';
 
 const PITCH_LIMIT = Math.PI / 2 - 0.12;
+// Pointer Lock quirk (not this game's sensitivity/DPI handling): some
+// browsers occasionally report one huge spurious movementX/Y on the very
+// first mousemove after the lock (re)acquires — which happens here on
+// every attack click in first person, since regaining a dropped lock is
+// tied to mousedown. Unclamped, that single event snaps the camera
+// instantly (nothing smooths FPS rotation — see world.js). A per-event
+// cap kills that spike outright while never touching a real flick: even
+// a fast intentional 360 spins through many small events, none of which
+// come close to this on their own.
+const MAX_MOVE_PX = 250;
 
 export class Input {
   constructor(canvas, camera) {
@@ -23,8 +33,10 @@ export class Input {
 
     window.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement === canvas) {
-        this.look.yaw -= e.movementX * this.lookSensitivity;
-        this.look.pitch -= e.movementY * this.lookSensitivity;
+        const dx = Math.max(-MAX_MOVE_PX, Math.min(MAX_MOVE_PX, e.movementX));
+        const dy = Math.max(-MAX_MOVE_PX, Math.min(MAX_MOVE_PX, e.movementY));
+        this.look.yaw -= dx * this.lookSensitivity;
+        this.look.pitch -= dy * this.lookSensitivity;
         this.look.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.look.pitch));
         return;
       }

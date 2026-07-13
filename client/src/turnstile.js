@@ -20,9 +20,17 @@ function getSiteKey() {
   return siteKeyPromise;
 }
 
-function waitForScript() {
-  return new Promise((resolve) => {
-    const check = () => (window.turnstile ? resolve() : setTimeout(check, 100));
+// bounded: if Cloudflare's script never loads (ad blockers, corporate
+// filtering — not rare) this must give up rather than hang the join
+// forever with zero feedback
+function waitForScript(timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeoutMs;
+    const check = () => {
+      if (window.turnstile) return resolve();
+      if (Date.now() > deadline) return reject(new Error('turnstile script did not load'));
+      setTimeout(check, 100);
+    };
     check();
   });
 }
@@ -43,18 +51,22 @@ function ensureWidget() {
       callback: (token) => pending.shift()?.(token),
       'error-callback': () => pending.shift()?.(null),
     });
-  })();
+  })().catch((err) => { console.warn('turnstile:', err.message); });
   return readyPromise;
 }
 
 // resolves with a fresh response token, or '' if Turnstile isn't
-// configured (server will treat a missing token as "not configured" too,
-// since it only checks when TURNSTILE_SECRET_KEY is set)
+// configured, its script never loaded, or it errored/timed out — the
+// caller (net.js) treats '' as "couldn't verify" and surfaces that rather
+// than hanging the join indefinitely
 export async function getTurnstileToken() {
   await ensureWidget();
   if (widgetId === null) return '';
-  return new Promise((resolve) => {
-    pending.push((token) => resolve(token || ''));
-    window.turnstile.execute(widgetId);
-  });
+  return Promise.race([
+    new Promise((resolve) => {
+      pending.push((token) => resolve(token || ''));
+      window.turnstile.execute(widgetId);
+    }),
+    new Promise((resolve) => setTimeout(() => resolve(''), 15000)),
+  ]);
 }

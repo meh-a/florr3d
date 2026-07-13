@@ -146,6 +146,10 @@
     #death .small { font-size: 18px; }
 
     /* name gate: shown once on load, before the flower gets a name */
+    /* fixed, always on top of the name gate — see the HTML comment above
+       its markup for why this must never live inside #namegate */
+    #turnstile-container { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                            z-index: 50; }
     #namegate { position: absolute; inset: 0; background: rgba(0,0,0,0.45); display: flex;
                 align-items: center; justify-content: center; flex-direction: column; gap: 14px; }
     #namegate.hidden { display: none; }
@@ -221,16 +225,20 @@
       </div>
     </div>
     <div id="toasts"></div>
+    <!-- Cloudflare Turnstile renders here — deliberately OUTSIDE #namegate,
+         which is hidden the instant Play is clicked (before the join
+         actually completes). If it lived inside the gate, a session
+         Cloudflare decided needed a real interactive check would have its
+         only way to complete that check vanish out from under it,
+         hanging the join forever. Invisible for most players; a visible
+         checkbox/challenge only for the rest. -->
+    <div id="turnstile-container"></div>
     <div id="namegate">
       <div class="gametitle stroke">florr3d</div>
       <div class="namerow">
         <input id="nameinput" maxlength="16" placeholder="Guest" autocomplete="off" />
         <button id="playbtn">Play</button>
       </div>
-      <!-- Cloudflare Turnstile renders here only when a fresh human-check is
-           actually requested (see client/src/turnstile.js) — invisible for
-           most players, an inline checkbox/challenge for the rest -->
-      <div id="turnstile-container"></div>
       <div id="authrow">
         <a id="loginbtn" class="hidden" href="/auth/discord">Sign in with Discord</a>
         <span id="authstate" class="stroke"></span>
