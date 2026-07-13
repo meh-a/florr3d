@@ -25,6 +25,14 @@ const MAX_BUFFERED = 1_000_000;
 // spawn) to lag the server. High enough for a family/dorm NAT sharing one
 // address, far too low to matter as a lag weapon.
 const MAX_CONNS_PER_IP = 6;
+// Spectators (pre-join, name-gate views) beyond this get NO snapshot data
+// at all — not even a reduced-rate one — so a flood of connections that
+// never actually join (whether a stuck client, a passive bot swarm, or
+// just a big organic surge of curious visitors) costs the server only a
+// Map entry each, not per-tick view-building/encoding/send. Clicking
+// "Play" is entirely unaffected: joining always goes through regardless
+// of whether a connection was getting spectator frames.
+const MAX_ACTIVE_SPECTATORS = 60;
 
 // Attach the game websocket endpoint to an existing http server (the vite
 // dev/preview server in development, or server/index.js standalone). Uses
@@ -127,7 +135,9 @@ export function attachGameServer(httpServer, path = '/ws') {
     if (playerTick) {
       const specViews = [];
       if (specTick) {
+        let n = 0;
         for (const spec of spectators.values()) {
+          if (n++ >= MAX_ACTIVE_SPECTATORS) break; // rest get nothing this tick
           spec.target = world.spectateTarget(spec.target);
           specViews.push({ key: spec.key, ...spec.target });
         }
