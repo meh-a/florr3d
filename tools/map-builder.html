@@ -157,6 +157,9 @@ const TILE_TYPES = {
   jungle:    { name: 'Jungle',       color: '#0d5c2e', isWall: false },
   dirtWall:  { name: 'Dirt Wall',    color: '#63482a', isWall: true },
   stoneWall: { name: 'Stone Wall',   color: '#888c92', isWall: true },
+  // deep ocean — a distinct biome from the shallow, basin-style water tile
+  ocean:     { name: 'Ocean',        color: '#0f3d63', isWall: false },
+  oceanWall: { name: 'Ocean Wall',   color: '#0a2c47', isWall: true },
   // ramps that bridge one floor layer up to the next; rot is the mesh's Y
   // rotation (radians) that points the canonical +Z-uphill wedge the right way
   slopePZ:   { name: 'Slope (+Z)',   color: '#c98a4a', isWall: false, isSlope: true, rot: 0 },
@@ -168,7 +171,13 @@ const FLOOR_TYPES = Object.keys(TILE_TYPES).filter((t) => !TILE_TYPES[t].isWall)
 const WALL_TYPES = Object.keys(TILE_TYPES).filter((t) => TILE_TYPES[t].isWall);
 
 const TILE_SIZE = 20;   // world units per cell; matches the live game's shared/config.js
-const WALL_HEIGHT = 4;  // world units per wall layer
+const WALL_HEIGHT = 4;  // real per-block height the live game uses — export metadata only,
+                         // never used for editor geometry/positioning (see LAYER_HEIGHT)
+// the editor renders one layer as a true cube (same edge length as a cell's
+// footprint) so blocks read clearly in 3D; this is purely a local rendering
+// choice and doesn't affect the exported column heights (still integer
+// layer counts) or wallHeight metadata (still the real WALL_HEIGHT above)
+const LAYER_HEIGHT = TILE_SIZE;
 
 // ---------------------------------------------------------------------
 // State
@@ -246,13 +255,13 @@ function rebuildGridVisuals() {
 
 // shared geometry/material per tile type — only position/type vary per instance
 const floorGeo = new THREE.BoxGeometry(TILE_SIZE * 0.98, 0.5, TILE_SIZE * 0.98);
-const wallGeo = new THREE.BoxGeometry(TILE_SIZE * 0.98, WALL_HEIGHT * 0.98, TILE_SIZE * 0.98);
+const wallGeo = new THREE.BoxGeometry(TILE_SIZE * 0.98, LAYER_HEIGHT * 0.98, TILE_SIZE * 0.98);
 
-// canonical ramp wedge: rises from y=0 (at -Z) to y=WALL_HEIGHT (at +Z);
+// canonical ramp wedge: rises from y=0 (at -Z) to y=LAYER_HEIGHT (at +Z);
 // slopePX/NZ/NX are this same geometry rotated 90/180/270 around Y
 function buildSlopeGeometry() {
   const h = TILE_SIZE * 0.49;
-  const yLow = 0, yHigh = WALL_HEIGHT;
+  const yLow = 0, yHigh = LAYER_HEIGHT;
   const A = [-h, yLow, -h], B = [h, yLow, -h], C = [h, yLow, h], D = [-h, yLow, h];
   const E = [h, yHigh, h], F = [-h, yHigh, h];
   const tris = [
@@ -289,12 +298,12 @@ function setFloorMesh(key, gx, gz, gy, type) {
   const def = TILE_TYPES[type];
   const mesh = new THREE.Mesh(def.isSlope ? slopeGeo : floorGeo, materials[type]);
   if (def.isSlope) {
-    // wedge geometry already spans this layer's full height (0..WALL_HEIGHT locally)
-    mesh.position.set(x, gy * WALL_HEIGHT, z);
+    // wedge geometry already spans this layer's full height (0..LAYER_HEIGHT locally)
+    mesh.position.set(x, gy * LAYER_HEIGHT, z);
     mesh.rotation.y = def.rot;
   } else {
     // thin slab capping the top of its layer (layer 0 = ground level)
-    mesh.position.set(x, gy * WALL_HEIGHT - 0.25, z);
+    mesh.position.set(x, gy * LAYER_HEIGHT - 0.25, z);
   }
   mesh.userData = { kind: 'floor', gx, gz, gy, type };
   scene.add(mesh);
@@ -309,7 +318,7 @@ function setWallMesh(key, gx, gz, gy, type) {
   if (old) { scene.remove(old); wallMeshes.delete(key); }
   const [x, z] = cellCenter(gx, gz);
   const mesh = new THREE.Mesh(wallGeo, materials[type]);
-  mesh.position.set(x, gy * WALL_HEIGHT + WALL_HEIGHT / 2, z);
+  mesh.position.set(x, gy * LAYER_HEIGHT + LAYER_HEIGHT / 2, z);
   mesh.userData = { kind: 'wall', gx, gz, gy };
   scene.add(mesh);
   wallMeshes.set(key, mesh);
@@ -389,7 +398,7 @@ function pointerToCell(clientX, clientY) {
   }
 
   // Fallback: intersect the horizontal plane at the current layer's height
-  const planeY = state.layer * WALL_HEIGHT + (state.mode === 'wall' ? WALL_HEIGHT / 2 : 0);
+  const planeY = state.layer * LAYER_HEIGHT + (state.mode === 'wall' ? LAYER_HEIGHT / 2 : 0);
   groundPlane.constant = -planeY;
   if (!raycaster.ray.intersectPlane(groundPlane, hitPoint)) return null;
   const gx = Math.floor(hitPoint.x / TILE_SIZE);
@@ -408,10 +417,10 @@ function updateCursor(cell) {
   cursor.material.color.setHex(toolColor());
   if (state.mode === 'floor') {
     cursor.scale.set(TILE_SIZE * 0.96, 0.6, TILE_SIZE * 0.96);
-    cursor.position.set(x, cell.gy * WALL_HEIGHT + 0.3, z);
+    cursor.position.set(x, cell.gy * LAYER_HEIGHT + 0.3, z);
   } else {
-    cursor.scale.set(TILE_SIZE * 0.96, WALL_HEIGHT * 0.96, TILE_SIZE * 0.96);
-    cursor.position.set(x, cell.gy * WALL_HEIGHT + WALL_HEIGHT / 2, z);
+    cursor.scale.set(TILE_SIZE * 0.96, LAYER_HEIGHT * 0.96, TILE_SIZE * 0.96);
+    cursor.position.set(x, cell.gy * LAYER_HEIGHT + LAYER_HEIGHT / 2, z);
   }
 }
 
@@ -422,10 +431,10 @@ function updateSelectionOutline() {
   selOutline.visible = true;
   if (sel.kind === 'floor') {
     selOutline.scale.set(TILE_SIZE, 0.7, TILE_SIZE);
-    selOutline.position.set(x, sel.gy * WALL_HEIGHT + 0.2, z);
+    selOutline.position.set(x, sel.gy * LAYER_HEIGHT + 0.2, z);
   } else {
-    selOutline.scale.set(TILE_SIZE, WALL_HEIGHT, TILE_SIZE);
-    selOutline.position.set(x, sel.gy * WALL_HEIGHT + WALL_HEIGHT / 2, z);
+    selOutline.scale.set(TILE_SIZE, LAYER_HEIGHT, TILE_SIZE);
+    selOutline.position.set(x, sel.gy * LAYER_HEIGHT + LAYER_HEIGHT / 2, z);
   }
 }
 

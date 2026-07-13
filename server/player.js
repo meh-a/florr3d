@@ -164,13 +164,20 @@ export class Player {
       const len = Math.hypot(ax, az);
       if (len > 1) { ax /= len; az /= len; }
       if (ax !== 0 || az !== 0) {
-        const delta = new THREE.Vector3(
-          -Math.sin(yaw) * az + Math.cos(yaw) * ax, 0,
-          -Math.cos(yaw) * az - Math.sin(yaw) * ax
-        ).multiplyScalar(this.speed * dt);
-        this.pos.add(delta);
+        const dirX = -Math.sin(yaw) * az + Math.cos(yaw) * ax;
+        const dirZ = -Math.cos(yaw) * az - Math.sin(yaw) * ax;
+        this.pos.x += dirX * this.speed * dt;
+        this.pos.z += dirZ * this.speed * dt;
+        // moving: other players see the flower face the direction of
+        // travel (same convention as top-down movement below) — not
+        // necessarily where the camera looks, e.g. strafing or
+        // backpedaling while aiming elsewhere
+        this.facing = Math.atan2(dirX, dirZ);
+      } else {
+        // standing still: face wherever the camera looks, so an idle
+        // flower still reads as aiming a direction for other players
+        this.facing = yaw + Math.PI;
       }
-      this.facing = yaw + Math.PI;
     } else {
       // florr-style movement: flower chases the cursor, speed scales with distance
       const delta = new THREE.Vector3(input.tx - this.pos.x, 0, input.tz - this.pos.z);
