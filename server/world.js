@@ -1,5 +1,8 @@
-import { PETAL_TYPES, RARITIES, VIEW_RADIUS, PITCH_LIMIT } from '../shared/config.js';
-import { censorName } from './censor.js';
+import {
+  PETAL_TYPES, RARITIES, VIEW_RADIUS, PITCH_LIMIT,
+  CHAT_MAX_LEN, NAME_MAX_LEN, stripNonAscii,
+} from '../shared/config.js';
+import { censorName, censorMessage } from './censor.js';
 import { Player } from './player.js';
 import { MobManager } from './mobs.js';
 import { DropManager } from './drops.js';
@@ -8,6 +11,7 @@ import { updateCombat } from './combat.js';
 const r2 = (v) => Math.round(v * 100) / 100;
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 const SLOTS = 5;
+const CHAT_COOLDOWN_MS = 1200; // ~1 message per tap of Enter, spam past this is dropped silently
 
 // One authoritative shared world per server process. Every websocket
 // connection is a Player inside this world — they all see the same mobs,
@@ -79,7 +83,7 @@ export class World {
       case 'join': {
         // display name, sent once by the client; re-sent on reconnect
         if (typeof msg.name !== 'string') return;
-        const name = msg.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16);
+        const name = stripNonAscii(msg.name).trim().slice(0, NAME_MAX_LEN);
         player.name = (name && censorName(name)) || 'Guest';
         break;
       }
@@ -115,6 +119,18 @@ export class World {
         if (!item || !PETAL_TYPES[item.type] || !RARITIES[item.rarity]) return;
         const old = player.petals.equip(row, i, item);
         if (old) player.addToInventory(old.type, old.rarity, true);
+        break;
+      }
+      case 'chat': {
+        if (typeof msg.text !== 'string') return;
+        const now = Date.now();
+        if (now - player.lastChatAt < CHAT_COOLDOWN_MS) return; // silent drop, like the jointoken flood defense
+        const text = stripNonAscii(msg.text).trim().slice(0, CHAT_MAX_LEN);
+        if (!text) return;
+        player.lastChatAt = now;
+        // positional event: scoped to VIEW_RADIUS by the same nearEvents()
+        // filter as damage numbers, so chat is naturally proximity-only
+        this.events.push({ e: 'chat', id: player.id, x: player.pos.x, z: player.pos.z, text: censorMessage(text) });
         break;
       }
     }

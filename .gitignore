@@ -1,8 +1,10 @@
 node_modules/
+.env
 dist/
 dist-*/
 MULTIPLAYER_PLAN.md
 secrets.txt
+token.env
 accounts.db*
 client/assets-src/
 map.json

@@ -23,9 +23,11 @@ const MODELS = {
   hornet:  { url: new URL('../assets/hornet.glb', import.meta.url), yaw: YAW },
   ladybug: { url: new URL('../assets/ladybug.glb', import.meta.url), yaw: YAW },
   queen:   { url: new URL('../assets/queen.glb', import.meta.url), yaw: YAW },
-  soldier: { url: new URL('../assets/soldier.glb', import.meta.url), yaw: YAW },
+  // soldier.glb exists but its modeled wings clip the outline — soldier
+  // mobs render as a worker body + procedural wings (see makeMobMesh)
   worker:  { url: new URL('../assets/worker.glb', import.meta.url), yaw: YAW },
   baby:    { url: new URL('../assets/baby.glb', import.meta.url), yaw: YAW },
+  anthole: { url: new URL('../assets/anthole.glb', import.meta.url), yaw: YAW },
   // not a mob type: the hornet's projectile, docked on its tail and in
   // flight — modeled nose-opposite to the mobs, hence the mirrored yaw
   hornetmissile: { url: new URL('../assets/hornetmissile.glb', import.meta.url), yaw: -YAW },

@@ -26,8 +26,8 @@ const MOB_IDX = new Map(MOB_IDS.map((k, i) => [k, i]));
 
 const POS = 64;      // world units -> int16
 const ANG = 8192;    // radians -> int16
-const EV = { flash: 0, dmg: 1, toast: 2 };
-const EV_NAMES = ['flash', 'dmg', 'toast'];
+const EV = { flash: 0, dmg: 1, toast: 2, chat: 3 };
+const EV_NAMES = ['flash', 'dmg', 'toast', 'chat'];
 
 const textEnc = new TextEncoder();
 const textDec = new TextDecoder();
@@ -227,12 +227,14 @@ function writeEvent(w, ev) {
   w.u8(EV[ev.e]);
   if (ev.e === 'flash') { w.u8(ev.k === 'player' ? 0 : 1); w.u32(ev.id); }
   else if (ev.e === 'dmg') { w.u32(ev.a); w.pos(ev.x); w.pos(ev.z); }
+  else if (ev.e === 'chat') { w.u32(ev.id); w.pos(ev.x); w.pos(ev.z); w.str(ev.text); }
   else w.str(ev.text); // toast
 }
 function readEvent(r) {
   const e = EV_NAMES[r.u8()];
   if (e === 'flash') return { e, k: r.u8() === 0 ? 'player' : 'mob', id: r.u32() };
   if (e === 'dmg') return { e, a: r.u32(), x: r.pos(), z: r.pos() };
+  if (e === 'chat') return { e, id: r.u32(), x: r.pos(), z: r.pos(), text: r.str() };
   return { e, text: r.str() };
 }
 
@@ -242,7 +244,7 @@ function readEvent(r) {
 // doesn't know the transport changed. Buffers come from the network, so
 // decodeCmd must be wrapped in try/catch — truncated frames throw.
 
-const CMD_NAMES = ['join', 'input', 'swapSlot', 'swapRows', 'rotSpeed', 'equip'];
+const CMD_NAMES = ['join', 'input', 'swapSlot', 'swapRows', 'rotSpeed', 'equip', 'chat'];
 const CMD = new Map(CMD_NAMES.map((k, i) => [k, i]));
 
 export function encodeCmd(msg) {
@@ -276,6 +278,9 @@ export function encodeCmd(msg) {
       w.u8(Number(rarity) & 255);
       break;
     }
+    case 'chat':
+      w.str(msg.text);
+      break;
     default:
       throw new Error(`unknown command: ${msg.t}`);
   }
@@ -311,6 +316,8 @@ export function decodeCmd(buffer) {
       const rarity = r.u8();
       return { t, row, i, key: `${type}:${rarity}` };
     }
+    case 'chat':
+      return { t, text: r.str() };
     default:
       throw new Error('unknown command frame');
   }

@@ -9,8 +9,9 @@ import { Net } from './net.js';
 import { preloadMobModels } from './mobmodels.js';
 import { makeMinimap } from './minimap.js';
 import { setupMobileControls, joyWorldOffset } from './mobile.js';
-import { MOB_TYPES } from '../../shared/config.js';
+import { MOB_TYPES, CHAT_MAX_LEN, NAME_MAX_LEN } from '../../shared/config.js';
 import { initQualityToggle } from './settings.js';
+import { restrictToAscii } from './utils.js';
 
 const INPUT_RATE = 1 / 30; // seconds between input packets, matches server tick
 
@@ -84,7 +85,7 @@ Promise.all([
         local: 'No server found — running locally',
         updating: 'Updating…',
         full: 'Server is packed right now — you\'re in line, hang tight…',
-        blocked: 'Couldn\'t verify you\'re human — disable ad blockers for this site and hit Play again',
+        blocked: 'Couldn\'t verify you\'re human — disable ad blockers for this site, or log in with Discord to skip this check, and hit Play again',
       }[mode]);
     },
   });
@@ -97,6 +98,7 @@ Promise.all([
   let joining = false; // ignore repeat clicks while a join attempt is in flight
   nameInput.value = localStorage.getItem('playerName') || '';
   nameInput.focus();
+  restrictToAscii(nameInput, NAME_MAX_LEN);
   // The gate must stay up (and Play disabled) until sendJoin actually
   // settles: it can be waiting on a Turnstile check that needs the player
   // to see and click something. Hiding the gate the instant Play is
@@ -169,6 +171,49 @@ Promise.all([
   setupMobileControls(game, toggleCamera);
   game.input.on('v', () => {
     game.ui.toast(game.arrows.toggle() ? 'Player arrows on' : 'Player arrows off');
+  });
+  // global chat mute: persisted like the quality setting, one button in the
+  // HUD corner rather than per-player controls
+  const CHAT_MUTE_KEY = 'florr3d-chatmuted';
+  const mutechatBtn = document.getElementById('mutechat');
+  const renderMuteBtn = () => { mutechatBtn.textContent = `Chat: ${game.entities.chatMuted ? 'Muted' : 'On'}`; };
+  let chatMuted = false;
+  try { chatMuted = localStorage.getItem(CHAT_MUTE_KEY) === '1'; } catch {}
+  game.entities.setChatMuted(chatMuted);
+  renderMuteBtn();
+  mutechatBtn.onclick = () => {
+    game.entities.setChatMuted(!game.entities.chatMuted);
+    try { localStorage.setItem(CHAT_MUTE_KEY, game.entities.chatMuted ? '1' : '0'); } catch {}
+    renderMuteBtn();
+  };
+  // proximity chat: Enter opens the box, Enter again sends (only to players
+  // still within view range, enforced server-side), Escape cancels. Typing
+  // itself never reaches WASD/hotkeys — input.js ignores keydowns targeting
+  // an <input> element.
+  const chatBox = document.getElementById('chatbox');
+  const chatInput = document.getElementById('chatinput');
+  restrictToAscii(chatInput, CHAT_MAX_LEN);
+  let chatRelockFps = false; // was fps pointer-locked when chat opened, so re-lock on close
+  const closeChat = () => {
+    chatBox.classList.remove('show');
+    chatInput.blur();
+    if (chatRelockFps) { chatRelockFps = false; if (!touch) game.input.lockPointer(); }
+  };
+  game.input.on('enter', () => {
+    if (!chosenName || chatBox.classList.contains('show')) return;
+    chatBox.classList.add('show');
+    chatInput.value = '';
+    chatInput.focus();
+    if (game.fpsMode && !touch) { chatRelockFps = true; game.input.unlockPointer(); }
+  });
+  chatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const text = chatInput.value.trim();
+      if (text) game.net.send({ t: 'chat', text });
+      closeChat();
+    } else if (e.key === 'Escape') {
+      closeChat();
+    }
   });
   game.input.on('r', () => game.net.send({ t: 'swapRows' }));
   game.input.on('q', () => game.net.send({ t: 'rotSpeed', delta: -0.175 }));

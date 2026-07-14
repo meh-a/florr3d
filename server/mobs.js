@@ -1,16 +1,28 @@
 import * as THREE from 'three';
 import {
   MOB_TYPES, RARITIES, MOB_CAP, ARENA_HALF, TILE_SIZE, SPAWN_POS,
-  DROP_DAMAGE_FRAC, MIN_LOOTERS, EQUAL_RARITY_DROP_BASE,
+  DROP_DAMAGE_FRAC, MIN_LOOTERS, EQUAL_RARITY_DROP_BASE, VIEW_RADIUS,
   clampToArena, collideWalls, isWallCell, wallTopAt,
   tileTypeAt, pickRarity, pickDrop,
 } from '../shared/config.js';
+
+// Stale-mob recycling: a mob nobody has been near for this long silently
+// despawns (no loot, no xp), freeing its cap slot for a fresh spawn
+// elsewhere. This is the structural guard against cap squatters — mob
+// slots only free on death, so anything players can't or won't kill
+// (Mythic+ hp, armor-walled rocks) otherwise accumulates until the whole
+// cap is immortal and ambient spawning starves. Invisible to players by
+// construction: it only ever fires outside everyone's VIEW_RADIUS.
+const STALE_RECYCLE_AFTER = 600; // 10 min with no player in view
+const STALE_SWEEP_INTERVAL = 5;
 
 // spawns this close to the player spawn point never exceed Rare, whatever
 // the depth roll says — fresh flowers shouldn't meet an Ultra on tile one
 const SAFE_RING = 60;
 const SAFE_RING_MAX_RARITY = 2;
 import { uid, damp } from './utils.js';
+import { notifyUltraSpawn } from './discord.js';
+import { spawnEscort, releaseGarrison, tickHoleAnt } from './ants.js';
 
 // Hornet flight tuning. The attack rhythm is: hover out of reach and lob
 // missiles (dodgeable / shootable), then dive low in a telegraphed strafing
@@ -83,12 +95,15 @@ class Mob {
       e: 'dmg', a: Math.round(dealt),
       x: Math.round(this.pos.x * 100) / 100, z: Math.round(this.pos.z * 100) / 100,
     });
-    // Rare+ mobs retaliate when attacked
-    if (this.rarity >= 2) this.aggro = true;
-    if (source) {
+    // Rare+ mobs retaliate when attacked; neutral types (worker ant) always
+    // do; passive types (baby ant) never do
+    if (!this.def.passive && (this.rarity >= 2 || this.def.retaliates)) this.aggro = true;
+    // stationary mobs (ant holes, rocks) don't slide around when hit
+    if (source && this.speed > 0) {
       const push = this.pos.clone().sub(source).setY(0).normalize().multiplyScalar(9);
       this.knock.add(push);
     }
+    if (this.type === 'anthole') releaseGarrison(this.world.mobs, this);
     if (this.hp <= 0) this.die();
   }
 
@@ -125,6 +140,8 @@ class Mob {
   }
 
   update(dt) {
+    if (this.hole) tickHoleAnt(this, dt); // orphaned garrison ants despawn
+    if (this.deadFlag) return;
     if (this.type === 'hornet') this.updateHornet(dt);
     else this.updateGround(dt);
 
@@ -139,6 +156,15 @@ class Mob {
   updateGround(dt) {
     const player = this.world.nearestPlayer(this.pos);
     let vel = new THREE.Vector3();
+
+    // sight-aggro types (soldier ant) charge anyone inside their reach and
+    // give up past the leash — however the aggro started, so a sniped
+    // soldier still stops chasing once you've clearly outrun it
+    if (this.def.sightAggro) {
+      const d = player ? this.pos.distanceTo(player.pos) : Infinity;
+      if (d < this.def.sightAggro) this.aggro = true;
+      else if (d > this.def.leash) this.aggro = false;
+    }
 
     if (this.speed > 0) {
       if (this.aggro && player) {
@@ -274,6 +300,7 @@ export class MobManager {
     this.mobs = [];
     this.missiles = [];
     this.spawnTimer = 0;
+    this.staleTimer = STALE_SWEEP_INTERVAL;
     const initial = Math.floor(MOB_CAP * 0.8);
     for (let i = 0; i < initial; i++) this.trySpawn();
   }
@@ -282,15 +309,11 @@ export class MobManager {
   // their maxAlive cap are excluded from the roll entirely. maxAlive values
   // are tuned for the default 56-mob arena and scale with the actual cap,
   // so a big map keeps the same population share (never below the tuned
-  // number on small arenas) — except sqrtCap types, which grow with the
-  // square root of the cap instead of linearly (dangerous fliers should get
-  // somewhat more common on a bigger map, not multiply in lockstep with it).
+  // number on small arenas).
   pickType() {
     const alive = {};
     for (const m of this.mobs) alive[m.type] = (alive[m.type] || 0) + 1;
-    const capOf = (def) => def.sqrtCap
-      ? Math.max(def.maxAlive, Math.round(def.maxAlive * Math.sqrt(MOB_CAP / 56)))
-      : Math.max(def.maxAlive, Math.round(def.maxAlive * MOB_CAP / 56));
+    const capOf = (def) => Math.max(def.maxAlive, Math.round(def.maxAlive * MOB_CAP / 56));
     const entries = Object.entries(MOB_TYPES)
       .filter(([type, def]) => !def.maxAlive || (alive[type] || 0) < capOf(def));
     let total = 0;
@@ -326,9 +349,28 @@ export class MobManager {
       const maxDist = Math.hypot(ARENA_HALF + Math.abs(SPAWN_POS.x), ARENA_HALF + Math.abs(SPAWN_POS.z));
       let rarity = pickRarity(Math.random, Math.min(1, dist / maxDist));
       if (dist < SAFE_RING) rarity = Math.min(rarity, SAFE_RING_MAX_RARITY);
-      this.mobs.push(new Mob(this.world, this.pickType(), rarity, pos));
+      // per-tier population caps (RARITIES maxShare): a roll for a tier
+      // that's full steps down until it finds room — high tiers must stay
+      // scarce or they slowly monopolize the cap (see RARITIES comment)
+      const aliveByRarity = new Array(RARITIES.length).fill(0);
+      for (const m of this.mobs) aliveByRarity[m.rarity]++;
+      const tierFull = (r) => RARITIES[r].maxShare !== undefined &&
+        aliveByRarity[r] >= Math.max(1, Math.round(RARITIES[r].maxShare * MOB_CAP));
+      while (rarity > 0 && tierFull(rarity)) rarity--;
+      const type = this.pickType();
+      const mob = this.spawn(type, rarity, pos);
+      if (type === 'anthole') spawnEscort(this, mob);
+      if (rarity === RARITIES.length - 1) notifyUltraSpawn(MOB_TYPES[type].name);
       return;
     }
+  }
+
+  // direct spawn, no placement rules or cap check — for callers that manage
+  // their own placement (ant hole garrisons); trySpawn is the ambient path
+  spawn(type, rarity, pos) {
+    const mob = new Mob(this.world, type, rarity, pos);
+    this.mobs.push(mob);
+    return mob;
   }
 
   // launch the hornet's tail missile at its target player's current
@@ -363,6 +405,23 @@ export class MobManager {
     }
 
     for (const mob of this.mobs) mob.update(dt);
+
+    // stale sweep (see STALE_RECYCLE_AFTER): coarse-grained on purpose —
+    // checking every mob against every player each tick would be waste
+    this.staleTimer -= dt;
+    if (this.staleTimer <= 0) {
+      this.staleTimer = STALE_SWEEP_INTERVAL;
+      const alive = [...this.world.players.values()].filter((p) => !p.dead);
+      const r2 = VIEW_RADIUS * VIEW_RADIUS;
+      for (const m of this.mobs) {
+        if (alive.some((p) => p.pos.distanceToSquared(m.pos) < r2)) {
+          m.lonely = 0;
+        } else {
+          m.lonely = (m.lonely || 0) + STALE_SWEEP_INTERVAL;
+          if (m.lonely >= STALE_RECYCLE_AFTER) m.deadFlag = true;
+        }
+      }
+    }
 
     // Gentle mob-mob separation so they don't stack. Broad phase is a
     // uniform hash grid rebuilt per tick: cells are wider than the largest

@@ -39,6 +39,18 @@ export function censorName(name) {
   return name;
 }
 
+// Chat censor: unlike censorName (reject the whole string), a chat message
+// only stars out the offending word(s) — losing one word out of a sentence
+// is fine, losing the whole message over one flagged word isn't.
+export function censorMessage(text) {
+  return text.replace(/\S+/g, (word) => {
+    const flat = normalize(word);
+    const squeezed = flat.replace(/(.)\1+/g, '$1');
+    const bad = BANNED.some((b) => flat.includes(b) || squeezed.includes(b));
+    return bad ? '*'.repeat(word.length) : word;
+  });
+}
+
 // Hard name bans — unlike profanity (which just resets the display name),
 // a match here refuses the connection outright (see ws.js): used to kick
 // coordinated bot swarms that self-identify by name. Matched on the same

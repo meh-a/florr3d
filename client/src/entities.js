@@ -36,6 +36,43 @@ function makeNameSprite(text) {
   return sprite;
 }
 
+// chat bubble: same canvas-sprite approach as the name tag, but with a flat
+// background pill behind the text (no gradient/shadow, matching the rest of
+// the HUD's chrome) so it reads clearly over any part of the scene
+function makeChatSprite(text) {
+  const fontSize = 40;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = `bold ${fontSize}px Ubuntu, sans-serif`;
+  const padX = fontSize * 0.55, padY = fontSize * 0.4;
+  const textW = ctx.measureText(text).width;
+  canvas.width = Math.ceil(textW + padX * 2);
+  canvas.height = Math.ceil(fontSize * 1.35 + padY * 2);
+  const r = canvas.height / 2;
+  ctx.fillStyle = 'rgba(15,20,15,0.72)';
+  ctx.beginPath();
+  ctx.roundRect(0, 0, canvas.width, canvas.height, r);
+  ctx.fill();
+  ctx.font = `bold ${fontSize}px Ubuntu, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff';
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2 + padY * 0.05);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: texture, transparent: true, depthTest: false, depthWrite: false, opacity: 0,
+  }));
+  const height = 0.8;
+  sprite.scale.set(height * (canvas.width / canvas.height), height, 1);
+  sprite.renderOrder = 992;
+  return sprite;
+}
+
+const CHAT_BUBBLE_MS = 5500;
+const CHAT_FADE_IN_MS = 200;
+const CHAT_FADE_OUT_MS = 700;
+
 // spawn immunity reads as a blinking flower: while the server says the
 // player can't be hit, opacity pulses each frame (updateImmuneLook, called
 // from the per-frame update); when it wears off everything restores
@@ -78,6 +115,8 @@ export class EntitySync {
     this.drops = new Map();    // id -> view
     this.missiles = new Map();  // id -> view (hornet missiles)
     this.pmissiles = new Map(); // id -> view (player-fired petals)
+    this.chatBubbles = new Map(); // playerId -> { sprite, mesh, expiresAt }
+    this.chatMuted = false;
 
     this.playerMesh = makeFlower(PLAYER_RADIUS);
     this.playerMesh.position.set(0, PLAYER_RADIUS, 0);
@@ -204,7 +243,36 @@ export class EntitySync {
       }
     } else if (ev.e === 'toast') {
       this.game.ui.toast(ev.text);
+    } else if (ev.e === 'chat') {
+      this.showChatBubble(ev.id, ev.text);
     }
+  }
+
+  // ---- chat bubbles ----
+
+  clearChatBubble(id) {
+    const b = this.chatBubbles.get(id);
+    if (!b) return;
+    this.game.scene.remove(b.sprite);
+    b.sprite.material.map.dispose();
+    b.sprite.material.dispose();
+    this.chatBubbles.delete(id);
+  }
+
+  setChatMuted(muted) {
+    this.chatMuted = muted;
+    if (muted) for (const id of [...this.chatBubbles.keys()]) this.clearChatBubble(id);
+  }
+
+  showChatBubble(id, text) {
+    if (this.chatMuted) return;
+    const mesh = id === this.state?.you ? this.playerMesh : this.players.get(id)?.mesh;
+    if (!mesh || !text) return;
+    this.clearChatBubble(id);
+    const sprite = makeChatSprite(text);
+    this.game.scene.add(sprite);
+    const now = performance.now();
+    this.chatBubbles.set(id, { sprite, mesh, startedAt: now, expiresAt: now + CHAT_BUBBLE_MS });
   }
 
   // ---- other players ----
@@ -218,7 +286,7 @@ export class EntitySync {
     this.game.scene.add(hpBar.mesh);
 
     const view = {
-      mesh, hpBar, nameSprite: null, name: undefined,
+      id: p.id, mesh, hpBar, nameSprite: null, name: undefined,
       target: new THREE.Vector3(p.x, PLAYER_RADIUS, p.z), facing: p.facing,
       dead: p.dead, hp: p.hp, maxHp: p.maxHp, displayHp: p.hp, greenHp: p.hp,
     };
@@ -247,6 +315,7 @@ export class EntitySync {
     this.game.scene.remove(v.nameSprite);
     v.nameSprite.material.map.dispose();
     v.nameSprite.material.dispose();
+    this.clearChatBubble(v.id);
   }
 
   // ---- mobs ----
@@ -416,8 +485,11 @@ export class EntitySync {
       const wings = v.mesh.userData.wingPivots;
       if (wings) {
         v.wingAge += dt;
-        // fast small-amplitude flap reads as a wing blur, not a slow wave
-        const flap = 0.35 + Math.sin(v.wingAge * 42) * 0.4;
+        // fast small-amplitude flap reads as a wing blur, not a slow wave;
+        // grounded wing-wearers (soldier ants) override with a lazy,
+        // shallower sway
+        const ud = v.mesh.userData;
+        const flap = 0.35 + Math.sin(v.wingAge * (ud.wingRate || 42)) * (ud.wingAmp || 0.4);
         for (const pivot of wings) pivot.rotation.z = flap;
         if (v.mesh.userData.missile) v.mesh.userData.missile.visible = v.loaded;
         if (v.blob) {
@@ -463,6 +535,18 @@ export class EntitySync {
       const petal = v.mesh.userData.petal;
       petal.rotation.y += dt * 1.8;
       petal.position.y = 1.1 + Math.sin(v.age * 3) * 0.18;
+    }
+
+    const now = performance.now();
+    for (const [id, b] of this.chatBubbles) {
+      if (now > b.expiresAt) { this.clearChatBubble(id); continue; }
+      b.sprite.visible = b.mesh.visible;
+      b.sprite.position.set(b.mesh.position.x, b.mesh.position.y + 4.05, b.mesh.position.z);
+      // ease in on arrival, ease out just before expiry, full opacity between
+      const age = now - b.startedAt, remaining = b.expiresAt - now;
+      const fadeIn = Math.min(1, age / CHAT_FADE_IN_MS);
+      const fadeOut = Math.min(1, remaining / CHAT_FADE_OUT_MS);
+      b.sprite.material.opacity = Math.max(0, Math.min(fadeIn, fadeOut));
     }
   }
 

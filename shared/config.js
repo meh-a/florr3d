@@ -6,15 +6,28 @@
 //   in-game curve: a flat x3 per tier (see petal-stats.csv, pulled from the
 //   real game). Petals with flatHp opt their health out of this scaling.
 // All are relative to Common = 1.
+// maxShare caps how much of MOB_CAP a tier may hold at once. High tiers are
+// effectively unkillable for most of the population, and mob slots only
+// free up on death — without a bound, immortal-tier rolls accumulate until
+// they own the whole cap and ambient spawning starves (this killed live
+// activity over ~13h on 2026-07-13/14).
 export const RARITIES = [
   { name: 'Common',    color: '#7eef6d', petalMult: 1,   statMult: 1,      dmgMult: 1,   armorMult: 1,   weight: 100,  scale: 1.0  },
   { name: 'Unusual',   color: '#ffe65d', petalMult: 2,   statMult: 2,      dmgMult: 2,   armorMult: 2,   weight: 100,  scale: 1.2  },
   { name: 'Rare',      color: '#4d52e3', petalMult: 4,   statMult: 5,      dmgMult: 4,   armorMult: 4,   weight: 50,   scale: 1.5  },
   { name: 'Epic',      color: '#861fde', petalMult: 8,   statMult: 20,     dmgMult: 8,   armorMult: 8,   weight: 20,   scale: 2.0  },
-  { name: 'Legendary', color: '#de1f1f', petalMult: 16,  statMult: 120,    dmgMult: 16,  armorMult: 16,  weight: 5,    scale: 2.8  },
-  { name: 'Mythic',    color: '#1fdbde', petalMult: 32,  statMult: 800,    dmgMult: 32,  armorMult: 32,  weight: 1,    scale: 4.0  },
-  { name: 'Ultra',     color: '#ff2b75', petalMult: 64,  statMult: 10000,  dmgMult: 64,  armorMult: 64,  weight: 0.2,  scale: 6.0  },
+  { name: 'Legendary', color: '#de1f1f', petalMult: 16,  statMult: 120,    dmgMult: 16,  armorMult: 16,  weight: 5,    scale: 2.8,  maxShare: 0.05  },
+  { name: 'Mythic',    color: '#1fdbde', petalMult: 32,  statMult: 800,    dmgMult: 32,  armorMult: 32,  weight: 1,    scale: 4.0,  maxShare: 0.02  },
+  { name: 'Ultra',     color: '#ff2b75', petalMult: 64,  statMult: 10000,  dmgMult: 64,  armorMult: 64,  weight: 0.2,  scale: 6.0,  maxShare: 0.005 },
 ];
+
+// Chat/name input limits and the printable-ASCII filter, shared so the
+// client's input fields and the server's authoritative sanitizers can't
+// drift apart (standard English keyboard characters only — strips emoji,
+// accents, other scripts, and control characters).
+export const CHAT_MAX_LEN = 100;
+export const NAME_MAX_LEN = 16;
+export const stripNonAscii = (s) => s.replace(/[^\x20-\x7e]/g, '');
 
 // drops: [petalType|null, weight]
 export const MOB_TYPES = {
@@ -35,14 +48,46 @@ export const MOB_TYPES = {
     name: 'Hornet', hp: 62.5, dmg: 30, armor: 1, radius: 1.7, speed: 2.0, xp: 12,
     drops: [['missile', 0.5], ['orange', 0.5]],
     // rarer spawn than the basic mobs, and never more than a handful alive
-    // at once — it's much more dangerous, and unlike ground mobs its
-    // population only scales with the sqrt of arena size (sqrtCap), not
-    // linearly: a big map should mean somewhat more hornets, not dozens of
-    // them camping the sky at once
+    // at once — it's much more dangerous
     spawnWeight: 0.35,
     maxAlive: 6,
-    sqrtCap: true,
     missile: { hp: 5, dmg: 6, speed: 16, radius: 0.45 },
+  },
+  soldier: {
+    name: 'Soldier Ant', hp: 40, dmg: 10, armor: 0, radius: 1.5, speed: 1.8, xp: 7,
+    drops: [], // ant drops come in a later pass
+    // aggressive on sight like the hornet, but with a much shorter reach —
+    // florr lets you walk fairly close — and a leash distance past which it
+    // gives up the chase (both handled in the ground AI)
+    sightAggro: 14,
+    leash: 40,
+    // kept scarce in the wild — ant holes garrison plenty of them already,
+    // and an on-sight aggro mob everywhere gets oppressive fast
+    spawnWeight: 0.3,
+  },
+  worker: {
+    name: 'Worker Ant', hp: 25, dmg: 10, armor: 0, radius: 1.3, speed: 1.8, xp: 5,
+    drops: [], // ant drops come in a later pass
+    // neutral: fights back when hurt at any rarity (most mobs only Rare+),
+    // and turns aggressive when its ant hole is attacked
+    retaliates: true,
+  },
+  baby: {
+    name: 'Baby Ant', hp: 10, dmg: 10, armor: 0, radius: 1.0, speed: 1.4, xp: 2,
+    drops: [], // ant drops come in a later pass
+    // never fights back, even when hit or when its ant hole is under attack
+    // (florr's egg-spawned aggression arrives with the queen later)
+    passive: true,
+    spawnWeight: 0.6, // walking free xp — don't blanket the map in it
+  },
+  anthole: {
+    name: 'Ant Hole', hp: 500, dmg: 10, armor: 2, radius: 2.5, speed: 0, xp: 50,
+    drops: [], // ant drops come in a later pass
+    // an event-structure more than a mob: it garrisons ants as it takes
+    // damage (see ANTHOLE in server/ants.js), so a live one should be a
+    // rare find even on a big map
+    spawnWeight: 0.15,
+    maxAlive: 1,
   },
 };
 

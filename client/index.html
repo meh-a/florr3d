@@ -133,10 +133,10 @@
     #minimap { position: absolute; bottom: 48px; right: 14px; width: 140px; height: 140px;
                border: 2px solid rgba(0, 0, 0, 0.35); border-radius: 6px; opacity: 0.92;
                pointer-events: none; image-rendering: pixelated; }
-    #quality { position: absolute; bottom: 14px; right: 14px; font-size: 14px;
-               background: rgba(15,20,15,0.6); padding: 6px 14px; border-radius: 999px;
-               cursor: pointer; transition: transform 0.08s; }
-    #quality:hover { transform: scale(1.06); }
+    #bottomright { position: absolute; bottom: 14px; right: 14px; display: flex; gap: 8px; }
+    #mutechat, #quality { font-size: 14px; background: rgba(15,20,15,0.6); padding: 6px 14px;
+               border-radius: 999px; cursor: pointer; transition: transform 0.08s; }
+    #mutechat:hover, #quality:hover { transform: scale(1.06); }
 
     /* death overlay */
     #death { position: absolute; inset: 0; background: rgba(0,0,0,0.55); display: none;
@@ -179,6 +179,14 @@
     #loginnudge { font-size: 14px; color: #ffe763; text-align: center; line-height: 1.5; }
     #loginnudge.hidden { display: none; }
 
+    /* chat: hidden pill above the loadout bar, opened with Enter */
+    #chatbox { position: absolute; bottom: 158px; left: 50%; transform: translateX(-50%);
+               display: none; }
+    #chatbox.show { display: block; }
+    #chatinput { font-family: inherit; font-weight: 700; font-size: 15px; padding: 8px 14px;
+                 border: 4px solid rgba(0,0,0,0.25); border-radius: 999px; outline: none;
+                 background: #fff; color: #222; width: 280px; text-align: center; }
+
     /* toasts */
     #toasts { position: absolute; top: 90px; left: 50%; transform: translateX(-50%);
               display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; }
@@ -218,7 +226,10 @@
       <div id="inventory"></div>
       <div id="invhint" class="stroke">Click a petal, then a slot to equip</div>
     </div>
-    <div id="quality" class="stroke"></div>
+    <div id="bottomright">
+      <div id="mutechat" class="stroke"></div>
+      <div id="quality" class="stroke"></div>
+    </div>
     <div id="tooltip">
       <div class="tt-head"><span class="tt-name"></span><span class="tt-reload"></span></div>
       <div class="tt-rarity"></div>
@@ -230,6 +241,10 @@
       </div>
     </div>
     <div id="toasts"></div>
+    <div id="chatbox">
+      <!-- maxlength set from the shared CHAT_MAX_LEN in main.js -->
+      <input id="chatinput" placeholder="Say something…" autocomplete="off" />
+    </div>
     <!-- Cloudflare Turnstile renders here — deliberately OUTSIDE #namegate,
          which is hidden the instant Play is clicked (before the join
          actually completes). If it lived inside the gate, a session
@@ -241,7 +256,8 @@
     <div id="namegate">
       <div class="gametitle stroke">florr3d</div>
       <div class="namerow">
-        <input id="nameinput" maxlength="16" placeholder="Guest" autocomplete="off" />
+        <!-- maxlength set from the shared NAME_MAX_LEN in main.js -->
+        <input id="nameinput" placeholder="Guest" autocomplete="off" />
         <button id="playbtn">Play</button>
       </div>
       <div id="authrow">

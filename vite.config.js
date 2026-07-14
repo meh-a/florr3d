@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import { attachGameServer } from './server/ws.js';
-import { handleAuth, parseCookies } from './server/auth.js';
+import { handleAuth, parseCookies, sessionFromCookie } from './server/auth.js';
 import { mapPayload } from './server/map.js';
 import { mintJoinToken } from './server/jointoken.js';
 import { verifyTurnstile, turnstileConfigured, TURNSTILE_SITE_KEY } from './server/turnstile.js';
@@ -30,7 +30,8 @@ const attachJoinToken = (server) => server.middlewares.use(async (req, res, next
   }
   if (pathname !== '/join-token') return next();
   const ip = clientIp(req);
-  if (turnstileConfigured() && !verifyHumanCookie(parseCookies(req.headers.cookie).human, ip)) {
+  const loggedIn = sessionFromCookie(req.headers.cookie) != null;
+  if (!loggedIn && turnstileConfigured() && !verifyHumanCookie(parseCookies(req.headers.cookie).human, ip)) {
     const url = new URL(req.url, 'http://localhost');
     const ok = await verifyTurnstile(url.searchParams.get('turnstile'), ip);
     if (!ok) { res.writeHead(403, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'human-check-required' })); return; }

@@ -1,7 +1,20 @@
 import * as THREE from 'three';
+import { stripNonAscii } from '../../shared/config.js';
 
 // frame-rate independent lerp factor
 export function damp(k, dt) { return 1 - Math.exp(-k * dt); }
+
+// Strips an <input> down to the same character set the server's
+// authoritative sanitizer allows (shared stripNonAscii), so what's typed
+// here is never silently altered once it reaches the server. maxLen keeps
+// the field's cap on the same shared constant as the server's slice.
+export function restrictToAscii(input, maxLen) {
+  if (maxLen) input.maxLength = maxLen;
+  input.addEventListener('input', () => {
+    const filtered = stripNonAscii(input.value);
+    if (filtered !== input.value) input.value = filtered;
+  });
+}
 
 export function toonMat(color) {
   return new THREE.MeshToonMaterial({ color });

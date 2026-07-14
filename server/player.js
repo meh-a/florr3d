@@ -44,6 +44,7 @@ export class Player {
     this.knock = new THREE.Vector3();
     this.facing = 0;
     this.zoneToasts = new Set(); // biomes already announced this session
+    this.lastChatAt = 0; // Date.now() of the last accepted chat message, for rate limiting
     this.petals = new PetalManager(world, this);
   }
 

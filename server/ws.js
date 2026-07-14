@@ -22,9 +22,10 @@ const HEARTBEAT_MS = 30_000;
 // couldn't play at that latency anyway, and close() cleanup saves them.
 const MAX_BUFFERED = 1_000_000;
 // Per-IP connection cap: someone spammed ~50 tabs (all idle flowers at
-// spawn) to lag the server. High enough for a family/dorm NAT sharing one
-// address, far too low to matter as a lag weapon.
-const MAX_CONNS_PER_IP = 6;
+// spawn) to lag the server. Tightened from 6 to 2 during the spectator
+// -flood investigation — a shared family/dorm NAT past two players gets
+// blocked, accepted for now in favor of starving the flood.
+const MAX_CONNS_PER_IP = 2;
 // Spectators (pre-join, name-gate views) beyond this get NO snapshot data
 // at all — not even a reduced-rate one — so a flood of connections that
 // never actually join (whether a stuck client, a passive bot swarm, or
@@ -103,6 +104,22 @@ export function attachGameServer(httpServer, path = '/ws') {
       `max=${perf.max.toFixed(1)}ms of ${TICK_MS.toFixed(1)}ms budget ` +
       `out=${(perf.bytes / perf.n / 1024).toFixed(1)}KB/tick`);
     perf.n = perf.sim = perf.build = perf.send = perf.max = perf.bytes = 0;
+
+    // temporary diagnostic (see the spectator-flood investigation): a real
+    // visitor deciding whether to play never sends any message either
+    // until they click Play, so this only means something once a
+    // connection has had plenty of time to do so — bucket by age
+    const now = Date.now();
+    const buckets = { under30s: 0, s30to120: 0, over120sSilent: 0, everMessaged: 0 };
+    for (const spec of spectators.values()) {
+      const age = now - spec.connectedAt;
+      if (spec.everMessaged) buckets.everMessaged++;
+      else if (age < 30_000) buckets.under30s++;
+      else if (age < 120_000) buckets.s30to120++;
+      else buckets.over120sSilent++;
+    }
+    console.log(`[spec-breakdown] total=${spectators.size} everMessaged=${buckets.everMessaged} ` +
+      `silent<30s=${buckets.under30s} silent30-120s=${buckets.s30to120} silent>120s=${buckets.over120sSilent}`);
   }, 60_000);
 
   const encoder = new DeltaEncoder();
@@ -208,11 +225,16 @@ export function attachGameServer(httpServer, path = '/ws') {
     const ip = clientIp(req);
     ipCounts.set(ip, (ipCounts.get(ip) || 0) + 1);
     const accountId = sessionFromCookie(req?.headers?.cookie);
-    spectators.set(ws, { key: `spec${nextSpecKey++}`, target: null });
+    // connectedAt/everMessaged: diagnostic only, for the periodic spectator
+    // breakdown below — distinguishing a real visitor still deciding
+    // whether to play from a connection that never does anything at all
+    spectators.set(ws, { key: `spec${nextSpecKey++}`, target: null, connectedAt: Date.now(), everMessaged: false });
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
 
     ws.on('message', (data, isBinary) => {
+      const specEntry = spectators.get(ws);
+      if (specEntry) specEntry.everMessaged = true; // diagnostic — see connection above
       // binary frame = command from a current client; text frame = JSON from
       // a pre-binary bundle that hasn't auto-reloaded yet
       let msg;

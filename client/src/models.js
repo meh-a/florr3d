@@ -209,7 +209,7 @@ function makeHornetMob(radius) {
 // glb model (which ships wingless). Root of each wing is at its pivot, the
 // blade extends +X, so the pivot's rotation.z flaps it; the right pivot is
 // yaw-mirrored. Returns the pivots for the per-frame flap animation.
-function addHornetWings(group, radius, y, z) {
+function addHornetWings(group, radius, y, z, sweep = 0.5) {
   const wingGeo = sharedGeo(`hornet-wing-${radius}`, () => {
     const geo = new THREE.CircleGeometry(1, 14);
     geo.translate(1, 0, 0);
@@ -223,7 +223,7 @@ function addHornetWings(group, radius, y, z) {
   for (const sx of [-1, 1]) {
     const pivot = new THREE.Group();
     pivot.position.set(sx * radius * 0.12, y, z);
-    pivot.rotation.y = sx === 1 ? -0.5 : Math.PI + 0.5; // sweep both wings back
+    pivot.rotation.y = sx === 1 ? -sweep : Math.PI + sweep; // positive sweep angles both wings back
     const wing = new THREE.Mesh(wingGeo, wingMat);
     wing.rotation.x = -Math.PI / 2; // lay the blade flat
     wing.scale.set(radius * 0.85, radius * 0.36, 1);
@@ -326,13 +326,67 @@ export function makeHealthBar(width, anisotropy = 1) {
   return { mesh, texture, draw };
 }
 
+// three-segment ant silhouette, shared placeholder for the whole ant family
+function makeAntMob(radius, color) {
+  const group = new THREE.Group();
+  const lift = radius * 0.5;
+  const mat = toonMat(color);
+  const segGeo = sharedGeo('ant-seg', () => new THREE.SphereGeometry(1, 16, 12));
+  // [z offset, radius] head, thorax, abdomen
+  for (const [z, r] of [[0.85, 0.42], [0.15, 0.38], [-0.7, 0.58]]) {
+    const seg = new THREE.Mesh(segGeo, mat);
+    seg.scale.setScalar(r * radius);
+    seg.position.set(0, lift, z * radius);
+    group.add(seg);
+  }
+  enableShadows(group, { cast: true, receive: true });
+  return group;
+}
+
+function makeAntholeMob(radius) {
+  // a low dirt mound with a dark entrance crater on top
+  const group = new THREE.Group();
+  const moundGeo = sharedGeo('anthole-mound', () => new THREE.SphereGeometry(1, 20, 14));
+  const mound = new THREE.Mesh(moundGeo, toonMat('#9b6b3d'));
+  mound.scale.set(radius, radius * 0.45, radius);
+  group.add(mound);
+  const holeGeo = sharedGeo('anthole-pit', () => new THREE.CircleGeometry(1, 16));
+  const hole = new THREE.Mesh(holeGeo, toonMat('#241708'));
+  hole.rotation.x = -Math.PI / 2;
+  hole.scale.setScalar(radius * 0.4);
+  hole.position.y = radius * 0.46;
+  group.add(hole);
+  enableShadows(group, { cast: true, receive: true });
+  return group;
+}
+
 export function makeMobMesh(type, radius) {
   let group;
   if (type === 'rock') return makeRockMob(radius); // no model — stays procedural
   else if (type === 'ladybug') group = makeLadybugMob(radius);
   else if (type === 'bee') group = makeBeeMob(radius);
   else if (type === 'hornet') group = makeHornetMob(radius);
+  else if (type === 'soldier') group = makeAntMob(radius, '#a04a28');
+  else if (type === 'worker') group = makeAntMob(radius, '#b5622f');
+  else if (type === 'baby') group = makeAntMob(radius, '#d9a05e');
+  else if (type === 'anthole') group = makeAntholeMob(radius);
   else throw new Error(`unknown mob type ${type}`);
+
+  // the soldier glb's modeled wings clip through its inverted-hull outline,
+  // so soldiers wear the wingless worker body with the shared translucent
+  // flapping pair mounted on the back (same trick as the hornet glb)
+  if (type === 'soldier') {
+    swapInMobModel(group, 'worker', radius, (g, inst, r) => {
+      const box = new THREE.Box3().setFromObject(inst);
+      // negative sweep: wings angle opposite the hornet's on the ant body;
+      // steeper than the hornet's 0.5 so they tuck in along the body
+      // instead of spreading out sideways
+      g.userData.wingPivots = addHornetWings(g, r, box.max.y * 0.85, (box.min.z + box.max.z) * 0.2, -1.0);
+      g.userData.wingRate = 8;   // idle twitch — it walks, the hornet flies
+      g.userData.wingAmp = 0.04; // barely-perceptible resting quiver
+    });
+    return group;
+  }
 
   // procedural mesh doubles as a placeholder: the real model swaps in when
   // its (usually cached) download finishes

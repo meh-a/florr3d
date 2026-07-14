@@ -1,0 +1,36 @@
+The Soldier Ant is a mob in florr.io that was added on February 3rd, 2020. This ant is hostile toward all flowers regardless of being attacked or not.
+
+Behavior: Wanders around randomly, moving a few tiles before stopping and changing directions. Becomes aggressive when a flower gets close, at which point it will chase the flower. It's aggressive range is smaller than other aggressive mobs like beetles and hornets, allowing you to get closer. Soldier ants also stop chasing you if you're at least a moderate distance away. Soldier ants that spawn from an ant hole are aggressive upon spawning and will chase the attacker. One spawns around an ant hole when the ant hole spawns and 26 more spawn as the ant hole is being attacked. They are also aggressive towards Termites and Fire Ants.
+
+Speed: Slow when passive, medium when aggressive.
+
+--------
+
+The Worker Ant is a mob in florr.io that was added on February 3, 2020 in the old version. It's a neutral mob, only attacking if hurt, from damaged Ant Holes, or if you use Honey or Bulb.
+
+Wanders around like a passive mob until provoked, in which case will chase the flower with a normal speed.
+
+The Ant Hole is a legacy mob in florr.io. It spawns up to four different types of Ants when attacked.
+
+Speed: Stationary.
+
+Behavior: Upon Ant Holes spawning, three Baby Ants, two Worker Ants, and a Soldier Ant spawn around it. When attacked, more ants come out, those being five Baby Ants, eight Worker Ants, twenty-six Soldier Ants, and one Queen Ant the same rarity of the Ant Hole, in total. The Queen Ant comes out when the Ant Hole is low on health. Baby Ants and Worker Ants tend to come out before Soldier Ants. When attacked, all Worker Ants that are part of the Ant Hole become aggressive. This applies to all rarities of the Ant Hole.
+
+----------
+The Queen Ant is a mob that was added to florr.io on February 3, 2020. It has a lot of HP, and comes out of damaged Ant Holes.
+
+Speed: Average, but stops periodicaly to lay eggs.
+
+Behavior: Aggressive, Rare+ Queen Ants lay eggs that hatch into Soldier Ants of a rarity below the Queen Ant's.
+
+(don't add the egg feature yet)
+
+-------------
+The Baby Ant is a mob in florr.io. Baby Ants spawn in Garden (from Ant Holes or close to the Ant Hell portal) and Ant Hell.
+
+Speed: Slow (Moderate when spawned from Ant Eggs or provoked by Honey).
+
+Behavior: Baby Ants move a short distance slowly before pausing and eventually changing direction. Baby Ants are always passive if spawned naturally, but will attack if spawned from an Ant Egg. However, upon killing the player that spawned them, they become passive again.
+
+----
+
