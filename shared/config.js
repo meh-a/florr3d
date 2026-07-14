@@ -17,7 +17,7 @@ export const RARITIES = [
   { name: 'Rare',      color: '#4d52e3', petalMult: 4,   statMult: 5,      dmgMult: 4,   armorMult: 4,   weight: 50,   scale: 1.5  },
   { name: 'Epic',      color: '#861fde', petalMult: 8,   statMult: 20,     dmgMult: 8,   armorMult: 8,   weight: 20,   scale: 2.0  },
   { name: 'Legendary', color: '#de1f1f', petalMult: 16,  statMult: 120,    dmgMult: 16,  armorMult: 16,  weight: 5,    scale: 2.8,  maxShare: 0.05  },
-  { name: 'Mythic',    color: '#1fdbde', petalMult: 32,  statMult: 800,    dmgMult: 32,  armorMult: 32,  weight: 1,    scale: 4.0,  maxShare: 0.02  },
+  { name: 'Mythic',    color: '#1fdbde', petalMult: 32,  statMult: 800,    dmgMult: 32,  armorMult: 32,  weight: 2.5,  scale: 4.0,  maxShare: 0.04  },
   { name: 'Ultra',     color: '#ff2b75', petalMult: 64,  statMult: 10000,  dmgMult: 64,  armorMult: 64,  weight: 0.2,  scale: 6.0,  maxShare: 0.005 },
 ];
 
@@ -214,8 +214,10 @@ export function collideWalls(pos, radius) {
 // ...] }); consumers want per-tile object lists, so expand here.
 export function applyMap({ arenaHalf, tiles, walls = {} }) {
   // mob population keeps the default map's density: scale the cap with
-  // arena area, within sane bounds for the 20Hz tick budget
-  MOB_CAP = Math.min(400, Math.max(56, Math.round(56 * (arenaHalf / 185) ** 2)));
+  // arena area, within sane bounds for the 20Hz tick budget (ceiling
+  // raised 400 -> 520 in the 2026-07-14 spawn-rate buff; live ticked at
+  // ~5ms of the 50ms budget with 400)
+  MOB_CAP = Math.min(520, Math.max(56, Math.round(56 * (arenaHalf / 185) ** 2)));
   ARENA_HALF = arenaHalf;
   MAP_TILES = [];
   tileTypes.clear();

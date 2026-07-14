@@ -400,7 +400,7 @@ export class MobManager {
   update(dt) {
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
-      this.spawnTimer = 0.5;
+      this.spawnTimer = 0.25; // faster refill after deaths (spawn-rate buff)
       this.trySpawn();
     }
 
