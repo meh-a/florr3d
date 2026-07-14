@@ -7,13 +7,13 @@
 //   real game). Petals with flatHp opt their health out of this scaling.
 // All are relative to Common = 1.
 export const RARITIES = [
-  { name: 'Common',    color: '#7eef6d', petalMult: 1,   statMult: 1,      dmgMult: 1,   armorMult: 1,   weight: 55,   scale: 1.0  },
-  { name: 'Unusual',   color: '#ffe65d', petalMult: 3,   statMult: 3.75,   dmgMult: 3,   armorMult: 2,   weight: 25,   scale: 1.3  },
-  { name: 'Rare',      color: '#4d52e3', petalMult: 9,   statMult: 13.5,   dmgMult: 9,   armorMult: 7,   weight: 12,   scale: 1.7  },
-  { name: 'Epic',      color: '#861fde', petalMult: 27,  statMult: 54,     dmgMult: 27,  armorMult: 22,  weight: 6,    scale: 2.2  },
-  { name: 'Legendary', color: '#de1f1f', petalMult: 81,  statMult: 324,    dmgMult: 81,  armorMult: 65,  weight: 2,    scale: 3.0  },
-  { name: 'Mythic',    color: '#1fdbde', petalMult: 243, statMult: 3159,   dmgMult: 243, armorMult: 194, weight: 0.8,  scale: 4.2  },
-  { name: 'Ultra',     color: '#ff2b75', petalMult: 729, statMult: 196830, dmgMult: 729, armorMult: 583, weight: 0.2,  scale: 5.5  },
+  { name: 'Common',    color: '#7eef6d', petalMult: 1,   statMult: 1,      dmgMult: 1,   armorMult: 1,   weight: 100,  scale: 1.0  },
+  { name: 'Unusual',   color: '#ffe65d', petalMult: 2,   statMult: 2,      dmgMult: 2,   armorMult: 2,   weight: 100,  scale: 1.2  },
+  { name: 'Rare',      color: '#4d52e3', petalMult: 4,   statMult: 5,      dmgMult: 4,   armorMult: 4,   weight: 50,   scale: 1.5  },
+  { name: 'Epic',      color: '#861fde', petalMult: 8,   statMult: 20,     dmgMult: 8,   armorMult: 8,   weight: 20,   scale: 2.0  },
+  { name: 'Legendary', color: '#de1f1f', petalMult: 16,  statMult: 120,    dmgMult: 16,  armorMult: 16,  weight: 5,    scale: 2.8  },
+  { name: 'Mythic',    color: '#1fdbde', petalMult: 32,  statMult: 800,    dmgMult: 32,  armorMult: 32,  weight: 1,    scale: 4.0  },
+  { name: 'Ultra',     color: '#ff2b75', petalMult: 64,  statMult: 10000,  dmgMult: 64,  armorMult: 64,  weight: 0.2,  scale: 6.0  },
 ];
 
 // drops: [petalType|null, weight]
@@ -32,13 +32,17 @@ export const MOB_TYPES = {
     drops: [['stinger', 1]],
   },
   hornet: {
-    name: 'Hornet', hp: 62.5, dmg: 50, armor: 1, radius: 1.7, speed: 2.0, xp: 12,
+    name: 'Hornet', hp: 62.5, dmg: 30, armor: 1, radius: 1.7, speed: 2.0, xp: 12,
     drops: [['missile', 0.5], ['orange', 0.5]],
-    // rarer spawn than the basic mobs, and never more than a few alive at
-    // once — it's much more dangerous
+    // rarer spawn than the basic mobs, and never more than a handful alive
+    // at once — it's much more dangerous, and unlike ground mobs its
+    // population only scales with the sqrt of arena size (sqrtCap), not
+    // linearly: a big map should mean somewhat more hornets, not dozens of
+    // them camping the sky at once
     spawnWeight: 0.35,
     maxAlive: 6,
-    missile: { hp: 5, dmg: 10, speed: 16, radius: 0.45 },
+    sqrtCap: true,
+    missile: { hp: 5, dmg: 6, speed: 16, radius: 0.45 },
   },
 };
 
@@ -48,14 +52,14 @@ export const MOB_TYPES = {
 export const PETAL_TYPES = {
   basic:     { name: 'Basic',   hp: 10, dmg: 10, reload: 2.5, radius: 0.42, count: 1, color: '#ffffff',
                desc: 'A nice petal, not too strong but not too weak.' },
-  rockPetal: { name: 'Rock',    hp: 30, dmg: 10, reload: 8,   radius: 0.5,  count: 1, color: '#7d7d84',
+  rockPetal: { name: 'Rock',    hp: 30, dmg: 10, reload: 4,   radius: 0.5,  count: 1, color: '#7d7d84',
                desc: 'Heavy and durable, with a slow reload.' },
   rose:      { name: 'Rose',    hp: 5,  dmg: 5,  reload: 3.5, radius: 0.42, count: 1, color: '#ff94c9', heal: 11,
                desc: 'Flies home to heal you when you’re hurt.' },
   light:     { name: 'Light',   hp: 5 / 3, dmg: 13 / 3, reload: 0.6, radius: 0.28, count: 3, color: '#ffffff',
                desc: 'Fires in a rapid volley of three.' },
   // in florr a stinger has 1 hp no matter the rarity — flatHp skips petalMult
-  stinger:   { name: 'Stinger', hp: 1,  dmg: 35, reload: 4,   radius: 0.35, count: 1, color: '#333333', flatHp: true,
+  stinger:   { name: 'Stinger', hp: 1,  dmg: 35, reload: 8,   radius: 0.35, count: 1, color: '#333333', flatHp: true,
                desc: 'Fragile, but deals heavy damage.' },
   orange:    { name: 'Orange',  hp: 2,  dmg: 8 / 3, reload: 1, radius: 0.3, count: 3, color: '#eb9c2d',
                desc: 'A weaker but faster version of Light.' },
@@ -69,6 +73,10 @@ export const PETAL_TYPES = {
 // loaded map can size the arena via applyMap before the sim/scene start —
 // every consumer reads the live binding at call time.
 export let ARENA_HALF = 185;
+
+// vertical aim clamp for projectile petals, shared so the client's input
+// sampling and the server's input validation agree on the same range
+export const PITCH_LIMIT = Math.PI / 2 - 0.12;
 
 // ---- terrain tiles ----
 // The arena is an implicit grass grid; MAP_TILES sparsely overrides cells by

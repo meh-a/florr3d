@@ -204,6 +204,7 @@ Promise.all([
       ax: axes.x, az: axes.z,
       fps: game.fpsMode,
       yaw: game.input.look.yaw,
+      pitch: game.input.aimPitch(game.fpsMode),
       atk: game.input.attackHeld(), // left mouse or space
       def: game.input.defendHeld(), // right mouse or shift
     });

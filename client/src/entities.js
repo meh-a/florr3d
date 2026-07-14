@@ -138,9 +138,10 @@ export class EntitySync {
         v.mesh.rotation.set(mi.pitch, mi.yaw, 0, 'YXZ');
       });
 
-    this.syncCollection(this.pmissiles, state.pmissiles || [], (p) => this.createPlayerMissile(p), (v) => this.removePetal(v),
+    this.syncCollection(this.pmissiles, state.pmissiles || [], (p) => this.createPlayerMissile(p), (v) => this.removeMissile(v),
       (v, p) => {
-        v.target.set(p.x, 1.1, p.z);
+        v.target.set(p.x, 1.1 + p.y, p.z);
+        v.mesh.rotation.set(p.pitch, p.yaw, 0, 'YXZ');
       });
 
     // every player's orbiting petals share one synced collection (ids are
@@ -335,14 +336,19 @@ export class EntitySync {
     disposeObject3D(v.mesh);
   }
 
-  // a fired missile petal in flight: same mesh as the petal, nose along yaw
+  // a fired missile petal in flight: the orbiting petal's own mesh
+  // (makePetalMesh) is scaled paper-thin on local Z — fine while it only
+  // ever yaws flat, but a pitched-up shot can present that thin edge to the
+  // camera and read as invisible. Use the dedicated missile mesh instead
+  // (same one the hornet's own tail missile uses), which is built to hold
+  // up at any pitch/yaw.
   createPlayerMissile(p) {
     const size = PETAL_TYPES[p.type].radius * (1 + p.rarity * 0.12);
-    const mesh = makePetalMesh(p.type, size * 1.15);
-    mesh.position.set(p.x, 1.1, p.z);
-    mesh.rotation.y = p.yaw;
+    const mesh = makeMissileMesh(size * 1.15);
+    mesh.position.set(p.x, 1.1 + p.y, p.z);
+    mesh.rotation.set(p.pitch, p.yaw, 0, 'YXZ');
     this.game.scene.add(mesh);
-    return { mesh, target: new THREE.Vector3(p.x, 1.1, p.z) };
+    return { mesh, target: new THREE.Vector3(p.x, 1.1 + p.y, p.z) };
   }
 
   // ---- drops ----

@@ -17,7 +17,7 @@ import { PETAL_TYPES, MOB_TYPES, VIEW_RADIUS } from './config.js';
 // PROTOCOL_VERSION guards across builds: on mismatch the decoder throws,
 // and the deploy auto-reload flow gets clients onto the matching build.
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 const PETAL_IDS = Object.keys(PETAL_TYPES);
 const MOB_IDS = Object.keys(MOB_TYPES);
@@ -206,11 +206,11 @@ const readMissile = (r) => ({
 
 const writePMissile = (w, pm) => {
   w.u32(pm.id); w.u8(PETAL_IDX.get(pm.type)); w.u8(pm.rarity);
-  w.pos(pm.pos.x); w.pos(pm.pos.z); w.ang(pm.yaw);
+  w.pos(pm.pos.x); w.pos(pm.pos.y); w.pos(pm.pos.z); w.ang(pm.yaw); w.ang(pm.pitch);
 };
 const readPMissile = (r) => ({
   id: r.u32(), type: PETAL_IDS[r.u8()], rarity: r.u8(),
-  x: r.pos(), z: r.pos(), yaw: r.ang(),
+  x: r.pos(), y: r.pos(), z: r.pos(), yaw: r.ang(), pitch: r.ang(),
 });
 
 const writeDrop = (w, d) => {
@@ -257,7 +257,7 @@ export function encodeCmd(msg) {
     case 'input':
       w.f32(msg.tx); w.f32(msg.tz);
       w.f32(msg.ax); w.f32(msg.az);
-      w.f32(msg.yaw);
+      w.f32(msg.yaw); w.f32(msg.pitch);
       w.u8((msg.fps ? 1 : 0) | (msg.atk ? 2 : 0) | (msg.def ? 4 : 0));
       break;
     case 'swapSlot':
@@ -291,7 +291,7 @@ export function decodeCmd(buffer) {
     case 'join':
       return { t, name: r.str(), token: r.str() };
     case 'input': {
-      const msg = { t, tx: r.f32(), tz: r.f32(), ax: r.f32(), az: r.f32(), yaw: r.f32() };
+      const msg = { t, tx: r.f32(), tz: r.f32(), ax: r.f32(), az: r.f32(), yaw: r.f32(), pitch: r.f32() };
       const flags = r.u8();
       msg.fps = !!(flags & 1);
       msg.atk = !!(flags & 2);

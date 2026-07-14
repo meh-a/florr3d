@@ -1,4 +1,4 @@
-import { PETAL_TYPES, RARITIES, VIEW_RADIUS } from '../shared/config.js';
+import { PETAL_TYPES, RARITIES, VIEW_RADIUS, PITCH_LIMIT } from '../shared/config.js';
 import { censorName } from './censor.js';
 import { Player } from './player.js';
 import { MobManager } from './mobs.js';
@@ -91,6 +91,7 @@ export class World {
         i.az = Math.max(-1, Math.min(1, num(msg.az)));
         i.fps = !!msg.fps;
         i.yaw = num(msg.yaw);
+        i.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, num(msg.pitch)));
         i.atk = !!msg.atk;
         i.def = !!msg.def;
         break;
@@ -247,7 +248,8 @@ export class World {
     const pmissileEntries = [...this.players.values()].flatMap((p) =>
       tag(p.petals.projectiles, (proj) => ({
         id: proj.id, type: proj.type, rarity: proj.rarity,
-        x: r2(proj.pos.x), z: r2(proj.pos.z), yaw: r2(proj.yaw),
+        x: r2(proj.pos.x), y: r2(proj.pos.y), z: r2(proj.pos.z),
+        yaw: r2(proj.yaw), pitch: r2(proj.pitch),
       })));
 
     // drops are individual loot: the wrapper keeps the owner so each

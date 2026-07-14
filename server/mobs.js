@@ -27,8 +27,11 @@ const HORNET = {
   fireRange: 45,
   fireInterval: 2.2,
   regrowTime: 0.9,  // missile visibly regrows on the tail after firing
-  swoopSpeedMult: 3.1,
-  swoopMaxTime: 4.5,
+  // slower dive with a longer overshoot means more time at petal height,
+  // i.e. a longer punish window per swoop instead of a fast blur-past
+  swoopSpeedMult: 1.8,
+  swoopOvershoot: 18,
+  swoopMaxTime: 8,
 };
 
 class Mob {
@@ -235,8 +238,8 @@ class Mob {
         if (f.shots <= 0) {
           f.state = 'swoop';
           f.timer = HORNET.swoopMaxTime;
-          // dive through the player's position and 12 units past it
-          f.target.copy(player.pos).addScaledVector(toPlayer, 12).setY(0);
+          // dive through the player's position and well past it
+          f.target.copy(player.pos).addScaledVector(toPlayer, HORNET.swoopOvershoot).setY(0);
         }
       }
     } else { // swoop
@@ -279,11 +282,15 @@ export class MobManager {
   // their maxAlive cap are excluded from the roll entirely. maxAlive values
   // are tuned for the default 56-mob arena and scale with the actual cap,
   // so a big map keeps the same population share (never below the tuned
-  // number on small arenas).
+  // number on small arenas) — except sqrtCap types, which grow with the
+  // square root of the cap instead of linearly (dangerous fliers should get
+  // somewhat more common on a bigger map, not multiply in lockstep with it).
   pickType() {
     const alive = {};
     for (const m of this.mobs) alive[m.type] = (alive[m.type] || 0) + 1;
-    const capOf = (def) => Math.max(def.maxAlive, Math.round(def.maxAlive * MOB_CAP / 56));
+    const capOf = (def) => def.sqrtCap
+      ? Math.max(def.maxAlive, Math.round(def.maxAlive * Math.sqrt(MOB_CAP / 56)))
+      : Math.max(def.maxAlive, Math.round(def.maxAlive * MOB_CAP / 56));
     const entries = Object.entries(MOB_TYPES)
       .filter(([type, def]) => !def.maxAlive || (alive[type] || 0) < capOf(def));
     let total = 0;

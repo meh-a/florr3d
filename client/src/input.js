@@ -1,6 +1,6 @@
 import * as THREE from 'three';
+import { PITCH_LIMIT } from '../../shared/config.js';
 
-const PITCH_LIMIT = Math.PI / 2 - 0.12;
 // Pointer Lock quirk (not this game's sensitivity/DPI handling): some
 // browsers occasionally report one huge spurious movementX/Y on the very
 // first mousemove after the lock (re)acquires — which happens here on
@@ -94,5 +94,13 @@ export class Input {
     this.raycaster.setFromCamera(this.mouseNDC, this.camera);
     this.raycaster.ray.intersectPlane(this.groundPlane, this.groundPoint);
     return this.groundPoint;
+  }
+
+  // vertical aim angle for projectile petals: first-person reuses the
+  // pointer-lock look pitch, third-person reads straight off the cursor's
+  // screen height (top of screen = aim up) since there's no ground-plane
+  // intersection that could carry an elevation
+  aimPitch(fps) {
+    return fps ? this.look.pitch : this.mouseNDC.y * PITCH_LIMIT;
   }
 }

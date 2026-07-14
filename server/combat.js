@@ -61,9 +61,9 @@ export function updateCombat(world, dt) {
     }
   }
 
-  // player missile projectiles vs mobs. Projectiles fly in the ground plane
-  // (y=0, like all petal combat), so a mob's altitude counts against the
-  // hit: airborne hornets are only reachable during their swoop.
+  // player missile projectiles vs mobs. Distance is full 3D, so an
+  // upward-aimed missile can now reach airborne hornets directly instead of
+  // only catching them during their low swoop.
   for (const player of players) {
     for (const proj of player.petals.projectiles) {
       if (proj.dead) continue;

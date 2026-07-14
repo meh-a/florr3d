@@ -26,13 +26,31 @@ export class PetalManager {
   }
 
   // Missile-type petals launch off the orbit while attacking: the petal
-  // flies out along its orbit direction as a straight projectile and the
-  // slot goes on reload, like losing the petal in florr. Server y stays 0
-  // (same plane as all petal combat); the client draws it at flower height.
+  // pops out from wherever it currently sits on the ring (like losing the
+  // petal in florr), but flies toward the player's actual aim rather than
+  // wherever the orbit spin happened to point it — the ring position alone
+  // is essentially random horizontally, which read as "wildly inaccurate"
+  // once pitch (genuinely mouse-aimed) was added on top of it. The orbit
+  // itself stays flat (y=0, same plane as all petal combat); pitch tilts
+  // the launch direction so a well-aimed missile can climb to reach
+  // airborne targets instead of only flying level.
   fireProjectile(inst) {
-    const dir = inst.pos.clone().sub(this.player.pos).setY(0);
-    if (dir.lengthSq() < 0.25) return; // not visibly extended yet
+    const orbitOffset = inst.pos.clone().sub(this.player.pos).setY(0);
+    if (orbitOffset.lengthSq() < 0.25) return; // not visibly extended yet
+
+    const input = this.player.input;
+    // third person: aim is the cursor's world target (same point movement
+    // chases); first person: aim is the look direction, since the cursor
+    // is locked to screen center and carries no usable ground point
+    const dir = input.fps
+      ? new THREE.Vector3(-Math.sin(input.yaw), 0, -Math.cos(input.yaw))
+      : new THREE.Vector3(input.tx - this.player.pos.x, 0, input.tz - this.player.pos.z);
+    if (dir.lengthSq() < 0.01) dir.copy(orbitOffset); // aimed right on top of yourself — fall back to the ring
     dir.normalize();
+    const yaw = Math.atan2(dir.x, dir.z);
+    const pitch = input.pitch;
+    dir.multiplyScalar(Math.cos(pitch));
+    dir.y = Math.sin(pitch);
     const def = PETAL_TYPES[inst.type].projectile;
     this.projectiles.push({
       id: uid(),
@@ -43,7 +61,10 @@ export class PetalManager {
       radius: inst.radius,
       dmg: inst.dmg,
       life: def.life,
-      yaw: Math.atan2(dir.x, dir.z),
+      yaw,
+      // rendering convention matches the hornet's own tail missile
+      // (mobs.js fireMissile): nose pitch is -atan(vertical/horizontal)
+      pitch: -pitch,
       dead: false,
     });
     this.destroyInstance(inst);
@@ -224,9 +245,9 @@ export class PetalManager {
     for (const proj of this.projectiles) {
       proj.pos.addScaledVector(proj.vel, dt);
       proj.life -= dt;
-      // missiles fly at flower height, so any wall column (min top
-      // WALL_HEIGHT) stops them
-      if (proj.life <= 0 || wallTopAt(proj.pos.x, proj.pos.z) > 1.1 ||
+      // an angled missile can now climb above short walls — only a column
+      // taller than its current altitude actually stops it
+      if (proj.life <= 0 || wallTopAt(proj.pos.x, proj.pos.z) > proj.pos.y ||
           Math.max(Math.abs(proj.pos.x), Math.abs(proj.pos.z)) > ARENA_HALF + 4) {
         proj.dead = true;
       }
